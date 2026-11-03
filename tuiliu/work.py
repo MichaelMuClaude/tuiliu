@@ -9,15 +9,21 @@
     python -m tuiliu.work topics                            # topics waiting to be set up
     python -m tuiliu.work set-topic ID --theme NAME --name NAME --description TEXT --keywords JSON
     python -m tuiliu.work backfill ID                       # search HN/GitHub for a topic (no AI)
+    python -m tuiliu.work add-url --topic ID URL [URL ...]  # queue pages found by web search
+    python -m tuiliu.work add-topic --theme NAME --name NAME --description TEXT [--keywords JSON]
+    python -m tuiliu.work cards --topic ID FILE.json [...]  # cards the session wrote itself, no source article
     python -m tuiliu.work sources                           # list feeds
     python -m tuiliu.work add-source URL --name NAME [--topic ID]
     python -m tuiliu.work enable ID [ID ...] [--off]
 """
 import argparse
+import html
 import json
+import re
+import time
 from pathlib import Path
 
-from . import ai, db, pipeline, seed
+from . import ai, db, pipeline, seed, sources
 
 TEXT_LIMIT = 5000
 PENDING_THEME = "新话题"
@@ -62,6 +68,7 @@ def cmd_batches(a):
     out.mkdir(parents=True, exist_ok=True)
     topics = pipeline.active_topics()
     brief = (ai.ITEM_RULES
+             + f"\n今天是 {time.strftime('%Y-%m-%d %A')}。活动类内容只写还没过去的场次，并写清日期。\n"
              + "\n## 读者的话题\n"
              + "\n".join(f"- id={t['id']}：{t['theme']} / {t['name']}：{t['description']}" for t in topics)
              + "\n\n## 读者收藏或点过喜欢的内容（代表他的口味）\n"
@@ -122,6 +129,34 @@ def cmd_set_topic(a):
     print(db.one("SELECT * FROM topics WHERE id=?", (a.id,)))
 
 
+def cmd_add_topic(a):
+    with db.tx() as c:
+        th = c.execute("SELECT id FROM themes WHERE name=?", (a.theme,)).fetchone()
+        theme_id = th["id"] if th else c.execute("INSERT INTO themes(name, created) VALUES(?,?)",
+                                                 (a.theme, db.now())).lastrowid
+        tid = c.execute("INSERT INTO topics(theme_id, name, description, keywords, created) VALUES(?,?,?,?,?)",
+                        (theme_id, a.name, a.description, a.keywords, db.now())).lastrowid
+    print(db.one("SELECT * FROM topics WHERE id=?", (tid,)))
+
+
+def cmd_cards(a):
+    """A series of cards written from the session's own knowledge (e.g. 100 small-talk tips)."""
+    n = 0
+    with db.tx() as c:
+        for path in a.files:
+            for k in json.loads(Path(path).read_text()):
+                points = pipeline._as_points(k.get("points"))
+                if not k.get("title", "").strip() or not points:
+                    continue
+                c.execute("INSERT INTO cards(item_id, topic_id, title, points, takeaway, score, evergreen, created, image)"
+                          " VALUES(NULL,?,?,?,?,?,?,?,?)",
+                          (a.topic, k["title"].strip(), json.dumps(points[:4], ensure_ascii=False),
+                           k.get("takeaway", "").strip(), k.get("score", 7), int(k.get("evergreen", True)),
+                           db.now() + n * 1e-3, k.get("image", "")))
+                n += 1
+    print(f"added {n} cards", json.dumps(pipeline.stats(), ensure_ascii=False))
+
+
 def cmd_sources(_):
     for s in db.rows("SELECT s.id, s.enabled, s.name, s.url, t.name AS topic FROM sources s"
                      " LEFT JOIN topics t ON t.id = s.topic_id ORDER BY s.id"):
@@ -144,6 +179,21 @@ def cmd_enable(a):
 
 def cmd_backfill(a):
     print("new items:", pipeline.backfill_topic(a.id, github=a.github))
+
+
+def cmd_add_url(a):
+    """Queue pages the session found itself (web search), for topics no feed covers."""
+    found = [{"url": u, "title": u} for u in a.urls]
+    for f in found:
+        try:
+            m = re.search(r"<title[^>]*>(.*?)</title>", sources._http.get(f["url"]).text, re.S | re.I)
+            f["title"] = html.unescape(m.group(1)).strip() if m else f["url"]
+        except Exception as e:
+            print("title fetch failed", f["url"], e)
+    ids = pipeline._insert_items(found, None, "backfill", a.topic)
+    pipeline.fill_text(ids)
+    for r in db.rows(f"SELECT id, status, length(text) n, title FROM items WHERE id IN ({','.join('?' * len(ids)) or 'NULL'})", ids):
+        print(f"{r['id']}\t{r['status']}\t{r['n']}\t{r['title']}")
 
 
 def main() -> None:
@@ -169,6 +219,12 @@ def main() -> None:
     s.add_argument("--keywords", required=True); s.set_defaults(fn=cmd_set_topic)
     s = sub.add_parser("backfill"); s.add_argument("id", type=int)
     s.add_argument("--no-github", dest="github", action="store_false"); s.set_defaults(fn=cmd_backfill)
+    s = sub.add_parser("add-url"); s.add_argument("--topic", type=int, required=True); s.add_argument("urls", nargs="+")
+    s.set_defaults(fn=cmd_add_url)
+    s = sub.add_parser("add-topic"); s.add_argument("--theme", required=True); s.add_argument("--name", required=True)
+    s.add_argument("--description", required=True); s.add_argument("--keywords", default="[]"); s.set_defaults(fn=cmd_add_topic)
+    s = sub.add_parser("cards"); s.add_argument("--topic", type=int, required=True); s.add_argument("files", nargs="+")
+    s.set_defaults(fn=cmd_cards)
     sub.add_parser("sources").set_defaults(fn=cmd_sources)
     s = sub.add_parser("add-source"); s.add_argument("url"); s.add_argument("--name", required=True)
     s.add_argument("--topic", type=int, help="file this feed's cards under that topic"); s.set_defaults(fn=cmd_add_source)

@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS cards (
     created REAL,
     last_shown REAL DEFAULT 0,
     shown_count INTEGER DEFAULT 0,
-    reaction INTEGER DEFAULT 0       -- 1 liked, -1 disliked
+    reaction INTEGER DEFAULT 0,      -- 1 liked, -1 disliked
+    image TEXT DEFAULT ''            -- optional picture, a /static/... path (road signs)
 );
 CREATE INDEX IF NOT EXISTS cards_shown ON cards(shown_count, created);
 CREATE TABLE IF NOT EXISTS events (
@@ -112,6 +113,8 @@ def init() -> None:
         cols = {r["name"] for r in c.execute("PRAGMA table_info(items)")}
         if "topic_hint" not in cols:  # databases created before 2026-11-03 14:30
             c.execute("ALTER TABLE items ADD COLUMN topic_hint INTEGER")
+        if "image" not in {r["name"] for r in c.execute("PRAGMA table_info(cards)")}:  # added 2026-11-04
+            c.execute("ALTER TABLE cards ADD COLUMN image TEXT DEFAULT ''")
 
 
 def rows(sql: str, args=()) -> list[dict]:

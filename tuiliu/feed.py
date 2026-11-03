@@ -10,7 +10,7 @@ WEIGHT_MIN, WEIGHT_MAX = 0.2, 3.0
 
 _CARD_SQL = """
 SELECT c.id, c.title, c.points, c.takeaway, c.score, c.evergreen, c.created, c.topic_id,
-       c.shown_count, c.reaction,
+       c.shown_count, c.reaction, c.image,
        COALESCE(t.name, '') AS topic, COALESCE(th.name, '') AS theme, th.id AS theme_id,
        COALESCE(t.weight, 1) * COALESCE(th.weight, 1) AS weight
 FROM cards c
@@ -56,7 +56,7 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
 
     return [{
         "id": c["id"], "title": c["title"], "points": json.loads(c["points"]), "takeaway": c["takeaway"],
-        "topic": c["topic"], "theme": c["theme"], "reaction": c["reaction"],
+        "topic": c["topic"], "theme": c["theme"], "reaction": c["reaction"], "image": c["image"],
     } for c in picked]
 
 

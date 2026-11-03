@@ -87,7 +87,7 @@ def post_event(e: Event):
 def get_favorites():
     """Cards the user double-tapped (reaction = 1), newest favourite first."""
     rows = db.rows("""
-        SELECT c.id, c.title, c.points, c.takeaway, COALESCE(t.name, '') AS topic, MAX(e.ts) AS saved
+        SELECT c.id, c.title, c.points, c.takeaway, c.image, COALESCE(t.name, '') AS topic, MAX(e.ts) AS saved
         FROM cards c
         LEFT JOIN topics t ON t.id = c.topic_id
         LEFT JOIN events e ON e.card_id = c.id AND e.type = 'like'

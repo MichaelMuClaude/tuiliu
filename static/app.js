@@ -72,6 +72,7 @@ function cardSlide(c) {
     h("article", { class: "card" + (c.reaction === 1 ? " faved" : "") },
       heart("fav-mark"),
       label ? h("span", { class: "chip" }, label) : null,
+      c.image ? h("img", { class: "card-img", src: c.image, alt: "" }) : null,
       h("h1", {}, c.title),
       h("ul", { class: "points" }, c.points.map(p => h("li", {}, p))),
       c.takeaway ? h("p", { class: "takeaway" }, "💡 ", c.takeaway) : null));
@@ -397,6 +398,7 @@ async function renderFavorites() {
     const remove = h("button", { class: "del" }, "取消收藏");
     const item = h("article", { class: "fav" },
       c.topic ? h("span", { class: "chip" }, c.topic) : null,
+      c.image ? h("img", { class: "card-img small", src: c.image, alt: "" }) : null,
       h("h4", {}, c.title),
       h("ul", {}, c.points.map(p => h("li", {}, p))),
       c.takeaway ? h("p", { class: "take" }, "💡 ", c.takeaway) : null,
