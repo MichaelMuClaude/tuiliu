@@ -1,0 +1,13 @@
+{
+  "name": "推流",
+  "short_name": "推流",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101114",
+  "theme_color": "#101114",
+  "icons": [
+    { "src": "/static/icon.svg?v=2", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/static/icon-180.png?v=2", "sizes": "180x180", "type": "image/png" },
+    { "src": "/static/icon-512.png?v=2", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

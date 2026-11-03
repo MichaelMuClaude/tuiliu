@@ -1,0 +1,7 @@
+anthropic==2.4.0
+fastapi==0.162.0
+feedparser==6.0.14
+httpx==0.28.1
+pyyaml==6.0.3
+trafilatura==2.3.1
+uvicorn==0.54.0

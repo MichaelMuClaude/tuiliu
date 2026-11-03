@@ -1,0 +1,109 @@
+"""Claude calls: judge an item and write its cards, and turn a topic description into search keywords."""
+import json
+
+import anthropic
+
+from .config import MODEL
+
+_client = None
+
+
+def client() -> anthropic.Anthropic:
+    global _client
+    if _client is None:
+        _client = anthropic.Anthropic(max_retries=4)
+    return _client
+
+
+CARD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "points": {"type": "array", "items": {"type": "string"}},
+        "takeaway": {"type": "string"},
+    },
+    "required": ["title", "points", "takeaway"],
+    "additionalProperties": False,
+}
+
+ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "keep": {"type": "boolean"},
+        "score": {"type": "integer"},
+        "topic_id": {"type": "integer"},
+        "evergreen": {"type": "boolean"},
+        "reason": {"type": "string"},
+        "cards": {"type": "array", "items": CARD_SCHEMA},
+    },
+    "required": ["keep", "score", "topic_id", "evergreen", "reason", "cards"],
+    "additionalProperties": False,
+}
+
+TOPIC_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "theme": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "keywords": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["theme", "name", "description", "keywords"],
+    "additionalProperties": False,
+}
+
+ITEM_RULES = """你是「推流」的编辑。推流是一个只给一位读者用的私人信息流：像刷短视频一样上下滑，但每一张卡片都必须是干货。你的工作是判断一篇内容值不值得推，值得的话把它写成卡片。
+
+## 判断（keep / score）
+- score 0-10：信息密度、可信度、和读者话题的相关度、对读者有没有实际用处。
+- 以下情况 keep=false：标题党、软文广告、纯情绪或口水、空洞的通稿、招聘、活动预告、正文太少看不出内容、和所有话题都无关。
+- score 低于 6 的一律 keep=false。宁缺毋滥：读者宁可少刷一张，也不要刷到垃圾。
+- topic_id：选最贴切的一个话题 id；keep=false 时如果都不相关就填 0。
+- evergreen：一年后读仍然有价值（工具介绍、方法、案例、知识）为 true；时效性新闻为 false。
+- reason：一句话说明判断理由。
+
+## 写卡片（只在 keep=true 时写，否则 cards 为空数组）
+- 用简体中文写，英文内容翻译成自然的中文，专有名词保留英文。
+- 一张卡片要完整讲完一件事，读者不需要再看原文。正文合计 150-250 个汉字。
+- title：不超过 28 个字，直接说清楚是什么，不当标题党，不用感叹号。
+- points：2-4 句。依次讲：发生了什么 / 核心观点；关键数字或事实；怎么用或怎么做到的。每句都要有具体信息，不说空话。
+- takeaway：一句话，说这件事对读者意味着什么、可以怎么用（不超过 40 字）。
+- 不要提来源、作者、公众号、网站名，也不要写「本文」「作者认为」。读者只要干货。
+- 文章里没有证实的说法（某公司号称、自称、预计），要写成「据称」「号称」，不能写成事实。
+- 只有内容确实一张讲不完（例如一篇长文里有几个互相独立的工具）才写 2-3 张，每张独立成立；否则只写 1 张。
+"""
+
+
+def _call(system: str, user: str, schema: dict, max_tokens: int = 4000) -> dict | None:
+    resp = client().messages.create(
+        model=MODEL,
+        max_tokens=max_tokens,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        thinking={"type": "disabled"},
+        output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
+    )
+    if resp.stop_reason in ("refusal", "max_tokens"):
+        return None
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    return json.loads(text)
+
+
+def judge_and_write(title: str, text: str, topics: list[dict], taste: list[str], hand_picked: bool) -> dict | None:
+    topic_lines = "\n".join(f"- id={t['id']}：{t['theme']} / {t['name']}：{t['description']}" for t in topics)
+    taste_lines = "\n".join(f"- {t}" for t in taste) or "（暂无）"
+    system = (ITEM_RULES
+              + "\n## 读者的话题\n" + topic_lines
+              + "\n\n## 读者收藏或点过喜欢的内容（代表他的口味）\n" + taste_lines)
+    note = "这篇是读者自己亲手收藏的文章，默认值得推，除非内容实在太空。\n\n" if hand_picked else ""
+    user = f"{note}标题：{title}\n\n正文：\n{text}"
+    return _call(system, user, ITEM_SCHEMA)
+
+
+def expand_topic(description: str, themes: list[str]) -> dict | None:
+    system = ("把读者用一句话描述的兴趣，整理成推流里的一个话题。"
+              "theme：从已有主题里选最合适的一个，原样返回它的名字；都不合适就新起一个简短的中文主题名。"
+              "name：话题名，简短中文，不超过 14 个字。description：一句话说明这个话题要推什么。"
+              "keywords：4-6 个用于在 Hacker News 和 GitHub 搜索的英文关键词或短语，再加 1-2 个中文关键词。"
+              "\n已有主题：" + "、".join(themes))
+    return _call(system, description, TOPIC_SCHEMA, max_tokens=1000)
