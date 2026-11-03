@@ -182,6 +182,10 @@ def patch_theme(theme_id: int, p: Patch):
 def delete_topic(topic_id: int):
     with db.tx() as c:
         c.execute("DELETE FROM topics WHERE id=?", (topic_id,))
+        # SQLite reuses the highest id, so a later topic could inherit this one's queued items: drop them.
+        c.execute("UPDATE items SET status=CASE WHEN status IN ('new','ready') THEN 'rejected' ELSE status END,"
+                  " reason=CASE WHEN status IN ('new','ready') THEN '话题已删除' ELSE reason END,"
+                  " topic_hint=NULL WHERE topic_hint=?", (topic_id,))
         # The app only shows topics, so a theme with none left has no way back; drop it.
         c.execute("DELETE FROM themes WHERE id NOT IN (SELECT theme_id FROM topics)")
     return {"ok": True}

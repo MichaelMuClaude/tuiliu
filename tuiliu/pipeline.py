@@ -187,8 +187,9 @@ def prune() -> None:
                   " AND fetched < ?", (stale,))
 
 
-def backfill_topic(topic_id: int) -> int:
-    """Search HN and GitHub for one topic's keywords, so a new topic gets cards within minutes."""
+def backfill_topic(topic_id: int, github: bool = True) -> int:
+    """Search HN and GitHub for one topic's keywords, so a new topic gets cards within minutes.
+    github=False for topics that are not about software (a company, local news)."""
     t = db.one("SELECT * FROM topics WHERE id=?", (topic_id,))
     if not t:
         return 0
@@ -196,7 +197,7 @@ def backfill_topic(topic_id: int) -> int:
     for kw in json.loads(t["keywords"] or "[]")[:6]:
         if not kw.isascii():
             continue  # HN and GitHub search work best with English keywords
-        for fn in (sources.search_hn, sources.search_github):
+        for fn in (sources.search_hn, sources.search_github) if github else (sources.search_hn,):
             try:
                 found += fn(kw)
             except Exception as e:

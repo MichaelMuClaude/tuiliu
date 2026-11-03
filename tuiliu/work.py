@@ -143,7 +143,7 @@ def cmd_enable(a):
 
 
 def cmd_backfill(a):
-    print("new items:", pipeline.backfill_topic(a.id))
+    print("new items:", pipeline.backfill_topic(a.id, github=a.github))
 
 
 def main() -> None:
@@ -167,7 +167,8 @@ def main() -> None:
     s = sub.add_parser("set-topic"); s.add_argument("id", type=int); s.add_argument("--theme", required=True)
     s.add_argument("--name", required=True); s.add_argument("--description", required=True)
     s.add_argument("--keywords", required=True); s.set_defaults(fn=cmd_set_topic)
-    s = sub.add_parser("backfill"); s.add_argument("id", type=int); s.set_defaults(fn=cmd_backfill)
+    s = sub.add_parser("backfill"); s.add_argument("id", type=int)
+    s.add_argument("--no-github", dest="github", action="store_false"); s.set_defaults(fn=cmd_backfill)
     sub.add_parser("sources").set_defaults(fn=cmd_sources)
     s = sub.add_parser("add-source"); s.add_argument("url"); s.add_argument("--name", required=True)
     s.add_argument("--topic", type=int, help="file this feed's cards under that topic"); s.set_defaults(fn=cmd_add_source)
