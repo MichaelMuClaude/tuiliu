@@ -10,6 +10,7 @@ import random
 import re
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import ai, db, seed, sources
@@ -48,10 +49,13 @@ def fetch_sources(force: bool = False) -> int:
     for s in db.rows("SELECT * FROM sources WHERE enabled=1"):
         if not force and s["last_fetched"] > due:
             continue
+        if "reddit.com" in s["url"]:
+            time.sleep(3)  # Reddit answers 429 to back-to-back requests
         try:
             found = sources.fetch_source(s["kind"], s["url"])
             origin = "collection" if s["kind"] == "collection" else "feed"
-            n = len(_insert_items(found, s["id"], origin))
+            # A source added for one topic files its cards under that topic.
+            n = len(_insert_items(found, s["id"], origin, s["topic_id"]))
             total += n
             log.info("fetched %-20s %3d found, %3d new", s["name"], len(found), n)
         except Exception as e:  # one broken feed must not stop the rest

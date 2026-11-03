@@ -3,11 +3,15 @@
     python -m tuiliu.work status
     python -m tuiliu.work queue [--limit N]                 # id, origin, title of queued items, for screening
     python -m tuiliu.work reject "reason" ID [ID ...]       # drop items by title alone
+    python -m tuiliu.work requeue ID [ID ...]               # give rejected items another pass
     python -m tuiliu.work batches OUT_DIR [--limit N] [--size 12]
     python -m tuiliu.work import RESULT.json [...]          # judgements + cards written by the session
     python -m tuiliu.work topics                            # topics waiting to be set up
     python -m tuiliu.work set-topic ID --theme NAME --name NAME --description TEXT --keywords JSON
     python -m tuiliu.work backfill ID                       # search HN/GitHub for a topic (no AI)
+    python -m tuiliu.work sources                           # list feeds
+    python -m tuiliu.work add-source URL --name NAME [--topic ID]
+    python -m tuiliu.work enable ID [ID ...] [--off]
 """
 import argparse
 import json
@@ -43,6 +47,14 @@ def cmd_reject(a):
         for i in a.ids:
             c.execute("UPDATE items SET status='rejected', reason=? WHERE id=? AND status='ready'", (a.reason, i))
     print(f"rejected {len(a.ids)}")
+
+
+def cmd_requeue(a):
+    """Give rejected items another pass, e.g. after the rules change."""
+    with db.tx() as c:
+        for i in a.ids:
+            c.execute("UPDATE items SET status='ready', reason='' WHERE id=? AND status='rejected' AND text!=''", (i,))
+    print(f"requeued {len(a.ids)}")
 
 
 def cmd_batches(a):
@@ -110,6 +122,26 @@ def cmd_set_topic(a):
     print(db.one("SELECT * FROM topics WHERE id=?", (a.id,)))
 
 
+def cmd_sources(_):
+    for s in db.rows("SELECT s.id, s.enabled, s.name, s.url, t.name AS topic FROM sources s"
+                     " LEFT JOIN topics t ON t.id = s.topic_id ORDER BY s.id"):
+        print(f"{s['id']}\t{'on ' if s['enabled'] else 'off'}\t{s['name']}\t{s['topic'] or ''}\t{s['url']}")
+
+
+def cmd_add_source(a):
+    with db.tx() as c:
+        c.execute("INSERT OR IGNORE INTO sources(kind, url, name, topic_id) VALUES('rss', ?, ?, ?)",
+                  (a.url, a.name, a.topic))
+    print(db.one("SELECT * FROM sources WHERE url=?", (a.url,)))
+
+
+def cmd_enable(a):
+    with db.tx() as c:
+        for i in a.ids:
+            c.execute("UPDATE sources SET enabled=? WHERE id=?", (int(a.on), i))
+    cmd_sources(a)
+
+
 def cmd_backfill(a):
     print("new items:", pipeline.backfill_topic(a.id))
 
@@ -126,6 +158,7 @@ def main() -> None:
     s = sub.add_parser("queue"); s.add_argument("--limit", type=int, default=500)
     s.add_argument("--origin", choices=["feed", "collection", "backfill"]); s.set_defaults(fn=cmd_queue)
     s = sub.add_parser("reject"); s.add_argument("reason"); s.add_argument("ids", type=int, nargs="+"); s.set_defaults(fn=cmd_reject)
+    s = sub.add_parser("requeue"); s.add_argument("ids", type=int, nargs="+"); s.set_defaults(fn=cmd_requeue)
     s = sub.add_parser("batches"); s.add_argument("out_dir"); s.add_argument("--limit", type=int, default=120)
     s.add_argument("--size", type=int, default=12)
     s.add_argument("--origin", choices=["feed", "collection", "backfill"]); s.set_defaults(fn=cmd_batches)
@@ -135,6 +168,11 @@ def main() -> None:
     s.add_argument("--name", required=True); s.add_argument("--description", required=True)
     s.add_argument("--keywords", required=True); s.set_defaults(fn=cmd_set_topic)
     s = sub.add_parser("backfill"); s.add_argument("id", type=int); s.set_defaults(fn=cmd_backfill)
+    sub.add_parser("sources").set_defaults(fn=cmd_sources)
+    s = sub.add_parser("add-source"); s.add_argument("url"); s.add_argument("--name", required=True)
+    s.add_argument("--topic", type=int, help="file this feed's cards under that topic"); s.set_defaults(fn=cmd_add_source)
+    s = sub.add_parser("enable"); s.add_argument("ids", type=int, nargs="+")
+    s.add_argument("--off", dest="on", action="store_false"); s.set_defaults(fn=cmd_enable)
     a = p.parse_args()
     a.fn(a)
 

@@ -16,6 +16,7 @@ cd ~/github/tuiliu && .venv/bin/python -m tuiliu.pipeline fetch
 - choose a theme (an existing one, or a short new Chinese name), a short Chinese name (14 characters at most), a one-sentence description, and 4-6 English search keywords plus 1-2 Chinese ones;
 - `work set-topic ID --theme ... --name ... --description ... --keywords '["...", ...]'`
 - `work backfill ID` searches Hacker News and GitHub, so the topic has articles queued straight away. Keywords go into the GitHub search as written, so a qualifier such as `created:>2026-09-01 stars:>1500` works (good for "hot right now" topics). To write only these articles now, add `--origin backfill` to `work queue` and `work batches`.
+- Topics that HN and GitHub cannot serve (local news, everyday 谈资) need feeds instead: test the RSS URL with curl, then `work add-source URL --name NAME --topic ID`, so its cards are filed under that topic. Any language is fine; cards are always written in Chinese (user, 2026-11-03: sources can come from anywhere in the world). `work sources` lists feeds; `work enable ID ... --off` pauses feeds whose topics were deleted.
 - Plain keywords sorted by stars bring up long-famous repos (TensorFlow, freeCodeCamp) and trackers of trending lists; screen those out in step 3.
 
 ## 3. Screen by title (cheap)

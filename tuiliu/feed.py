@@ -17,6 +17,7 @@ FROM cards c
 LEFT JOIN topics t ON t.id = c.topic_id
 LEFT JOIN themes th ON th.id = t.theme_id
 WHERE c.reaction >= 0
+  AND c.topic_id IS NOT NULL          -- cards of a deleted topic stop showing (favourites keep them)
   AND COALESCE(t.paused, 0) = 0 AND COALESCE(th.paused, 0) = 0
 """
 
