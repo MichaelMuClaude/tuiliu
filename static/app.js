@@ -480,6 +480,19 @@ async function renderFavorites() {
 if (!store("tuiliu-hint")) hintEl.hidden = false;
 next();
 
+// A faint line at the bottom: when the newest card was written.
+async function showLastPush() {
+  try {
+    const t = (await api("/api/status")).last_card;
+    if (!t) return;
+    const d = new Date(t * 1000), pad = n => String(n).padStart(2, "0");
+    document.getElementById("lastPush").textContent =
+      `上次推流 ${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch {}
+}
+showLastPush();
+setInterval(showLastPush, 10 * 60 * 1000);
+
 // ---------- chat ----------
 
 const chatEl = document.getElementById("chat");

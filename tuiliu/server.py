@@ -226,6 +226,7 @@ def status():
         "has_key": has_api_key(),
         "running": bool(db.get_meta("pipeline_running", False)),
         "last_run": db.get_meta("last_run", 0),
+        "last_card": db.one("SELECT MAX(created) t FROM cards")["t"] or 0,
         "stats": pipeline.stats(),
         "google_blocked": bool(db.get_meta("google_blocked", 0)),
     }
