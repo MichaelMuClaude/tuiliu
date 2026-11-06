@@ -90,7 +90,7 @@ def search_hn(query: str, days: int = 180, min_points: int = 30) -> list[dict]:
 # the chat use it like a person would. When Google asks for a CAPTCHA the user solves it over remote desktop.
 
 AI_BROWSER = "http://127.0.0.1:8888/api"
-BROWSER_LOCK = threading.Lock()   # one browser window, shared by the Google News pass and the chat: one user at a time
+BROWSER_LOCK = threading.RLock()  # one browser window, shared by the news collector and the chat: one job at a time
 
 _GOOGLE_JS = """(() => {
   const out = [];
