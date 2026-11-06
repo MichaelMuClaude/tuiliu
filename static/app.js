@@ -394,12 +394,14 @@ sheet.addEventListener("touchend", e => {
 async function renderTopics() {
   const [{ themes }, st] = await Promise.all([api("/api/topics"), api("/api/status").catch(() => null)]);
   const list = document.getElementById("themeList");
+  // Only news topics are listed: they are the ones searched for again and again. Series stay in the feed.
+  for (const th of themes) th.topics = th.topics.filter(t => t.kind !== "series");
   list.replaceChildren(...themes.filter(th => th.topics.length).map(th =>
     h("div", { class: "theme" },
       h("h3", {}, th.name),
       th.topics.map(t => {
         const pending = !t.keywords.length;
-        const about = t.kind === "series" ? `专题 · ${t.description}` : `新闻 · 搜索：${t.keywords.join("、")}`;
+        const about = `搜索：${t.keywords.join("、")}`;
         const note = pending ? "等下次更新推流时整理" : `${about} · ${t.cards} 张卡片`;
         const del = h("button", { class: "del" }, "删除");
         del.addEventListener("click", async () => {
