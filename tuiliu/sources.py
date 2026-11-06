@@ -3,6 +3,7 @@ import calendar
 import html
 import json
 import re
+import threading
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -107,6 +108,7 @@ def search_news(query: str) -> list[dict]:
 # CAPTCHA the user solves it by hand over remote desktop; until then Bing News alone is used.
 
 AI_BROWSER = "http://127.0.0.1:8888/api"
+BROWSER_LOCK = threading.Lock()   # one browser window, shared by the Google News pass and the chat: one user at a time
 
 _GOOGLE_JS = """(() => {
   const out = [];
@@ -131,18 +133,56 @@ def browser_running() -> bool:
         return False
 
 
-def search_google_news(query: str) -> list[dict]:
-    """News from the past day for one query, read from Google's results page in ai-browser."""
-    url = f"https://www.google.com/search?q={quote_plus(query)}&tbm=nws&hl=en&tbs=qdr:d"
+_GOOGLE_WEB_JS = """(() => {
+  const out = [];
+  for (const h of document.querySelectorAll('#search a h3')) {
+    const a = h.closest('a');
+    if (!a || out.some(o => o.url === a.href)) continue;
+    const box = a.closest('[data-hveid]') || a.parentElement;
+    const snippet = (box ? box.innerText : '').split('\\n').slice(2).join(' ').slice(0, 300);
+    out.push({ url: a.href, title: h.innerText.trim(), snippet });
+  }
+  return JSON.stringify({ blocked: /unusual traffic|not a robot/i.test(document.body.innerText), results: out });
+})()"""
+
+
+def _google_page(url: str, script: str, query: str) -> list[dict]:
+    """Open a Google results page in ai-browser and read its results (caller holds BROWSER_LOCK)."""
     _http.post(f"{AI_BROWSER}/navigate", json={"url": url, "return_look": False}, timeout=60).raise_for_status()
     time.sleep(3)   # let the results render
-    r = _http.post(f"{AI_BROWSER}/execute_js", json={"script": _GOOGLE_JS}, timeout=30)
+    r = _http.post(f"{AI_BROWSER}/execute_js", json={"script": script}, timeout=30)
     r.raise_for_status()
     page = json.loads(r.json()["result"])
     if page["blocked"]:
         raise GoogleBlocked(query)
+    return page["results"]
+
+
+def google_web(query: str) -> list[dict]:
+    """An ordinary Google search in ai-browser (for the chat): [{title, url, snippet}]."""
+    with BROWSER_LOCK:
+        found = _google_page(f"https://www.google.com/search?q={quote_plus(query)}&hl=en", _GOOGLE_WEB_JS, query)
+    return [f for f in found if "google." not in (urlparse(f["url"]).hostname or "")]
+
+
+def browser_read(url: str) -> dict:
+    """Open a page in ai-browser (a real Chrome, so pages built with JavaScript work) and return its main text."""
+    with BROWSER_LOCK:
+        nav = _http.post(f"{AI_BROWSER}/navigate", json={"url": url, "return_look": False}, timeout=60)
+        nav.raise_for_status()
+        time.sleep(2)
+        text = _http.get(f"{AI_BROWSER}/text", params={"main_content_only": "true"}, timeout=30).json().get("text", "")
+    n = nav.json()
+    return {"title": n.get("title", ""), "url": n.get("url", url), "blocked": n.get("blocked", False), "text": text}
+
+
+def search_google_news(query: str) -> list[dict]:
+    """News from the past day for one query, read from Google's results page in ai-browser."""
+    url = f"https://www.google.com/search?q={quote_plus(query)}&tbm=nws&hl=en&tbs=qdr:d"
+    with BROWSER_LOCK:
+        found = _google_page(url, _GOOGLE_JS, query)
     out = []
-    for f in page["results"]:
+    for f in found:
         real = f["url"]
         try:   # Google's /goto links answer with a redirect to the article itself
             loc = _http.get(real, follow_redirects=False, headers={"User-Agent": BROWSER_UA}).headers.get("location")
