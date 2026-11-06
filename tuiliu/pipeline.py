@@ -26,6 +26,9 @@ SCREEN_BATCH = 100   # titles compared with each other in one screening call
 STALE_NEWS_DAYS = 10
 SEARCH_EVERY_HOURS = 3    # each news topic's keywords are searched in the news this often
 SEARCH_MAX_AGE_DAYS = 3   # older search results are not news any more
+GOOGLE_EVERY_HOURS = 6    # Google News (through Nobrowser) is searched less often, to stay clear of its CAPTCHA
+GOOGLE_KEYWORDS = 4       # first keywords of each topic searched on Google
+GOOGLE_PAUSE = 10         # seconds between Google searches
 
 
 def _insert_items(found: list[dict], source_id: int | None, origin: str, topic_hint: int | None = None) -> list[int]:
@@ -90,8 +93,36 @@ def search_topics(force: bool = False) -> int:
         n = len(_insert_items(found, None, "feed", t["id"]))
         total += n
         log.info("searched %-20s %3d found, %3d new", t["name"], len(found), n)
-    return total
+    return total + search_google(force)
 
+
+def search_google(force: bool = False) -> int:
+    """Google News through ai-browser, every GOOGLE_EVERY_HOURS. Stops at the first CAPTCHA and records it
+    (meta google_blocked), so the app can ask the user to solve it over remote desktop; Bing keeps working meanwhile."""
+    if not force and db.now() - (db.get_meta("google_searched", 0) or 0) < GOOGLE_EVERY_HOURS * 3600:
+        return 0
+    if not sources.browser_running():
+        log.info("ai-browser is not running: no Google search this time")
+        return 0
+    db.set_meta("google_searched", db.now())
+    total = 0
+    for t in active_topics():
+        found = []
+        for kw in json.loads(t["keywords"] or "[]")[:GOOGLE_KEYWORDS]:
+            try:
+                found += sources.search_google_news(kw)
+            except sources.GoogleBlocked:
+                db.set_meta("google_blocked", db.now())
+                log.warning("Google asks for a CAPTCHA; solve it in ai-browser's Chrome over remote desktop")
+                return total + len(_insert_items(found, None, "feed", t["id"]))
+            except Exception as e:
+                log.warning("Google search failed %s %s: %s", t["name"], kw, e)
+            time.sleep(GOOGLE_PAUSE)
+        n = len(_insert_items(found, None, "feed", t["id"]))
+        total += n
+        log.info("google   %-20s %3d found, %3d new", t["name"], len(found), n)
+    db.set_meta("google_blocked", 0)
+    return total
 
 def _fill_one(item: dict) -> None:
     text = item["summary"] if len(item["summary"]) >= 1200 else ""

@@ -1,6 +1,7 @@
 """Fetchers. Each returns a list of dicts: url, title, summary, published, text (optional)."""
 import calendar
 import html
+import json
 import re
 import time
 from pathlib import Path
@@ -97,6 +98,59 @@ def search_news(query: str) -> list[dict]:
         if real.startswith("http") and e.get("title"):
             out.append({"url": real, "title": strip_html(e.title), "summary": strip_html(e.get("summary", "")),
                         "published": calendar.timegm(ts) if ts else time.time()})
+    return out
+
+
+# ---------- Google News through ai-browser ----------
+# Google blocks headless and fresh automated browsers at once, but answers ai-browser: a long-lived, visible Chrome
+# (its own profile, which can be signed in to Google) driven over HTTP on 127.0.0.1:8888. When Google asks for a
+# CAPTCHA the user solves it by hand over remote desktop; until then Bing News alone is used.
+
+AI_BROWSER = "http://127.0.0.1:8888/api"
+
+_GOOGLE_JS = """(() => {
+  const out = [];
+  for (const a of document.querySelectorAll('#search a[href]')) {
+    const h = a.querySelector('[role="heading"]');
+    if (!h || out.some(o => o.url === a.href)) continue;
+    const lines = a.innerText.split('\\n').map(s => s.trim()).filter(Boolean);
+    out.push({ url: a.href, title: h.innerText.trim(), snippet: lines.slice(2).join(' ').slice(0, 400) });
+  }
+  return JSON.stringify({ blocked: /unusual traffic|not a robot/i.test(document.body.innerText), results: out });
+})()"""
+
+
+class GoogleBlocked(Exception):
+    """Google answered with its 'unusual traffic' CAPTCHA page."""
+
+
+def browser_running() -> bool:
+    try:
+        return _http.get(f"{AI_BROWSER}/health", timeout=5).status_code == 200
+    except Exception:
+        return False
+
+
+def search_google_news(query: str) -> list[dict]:
+    """News from the past day for one query, read from Google's results page in ai-browser."""
+    url = f"https://www.google.com/search?q={quote_plus(query)}&tbm=nws&hl=en&tbs=qdr:d"
+    _http.post(f"{AI_BROWSER}/navigate", json={"url": url, "return_look": False}, timeout=60).raise_for_status()
+    time.sleep(3)   # let the results render
+    r = _http.post(f"{AI_BROWSER}/execute_js", json={"script": _GOOGLE_JS}, timeout=30)
+    r.raise_for_status()
+    page = json.loads(r.json()["result"])
+    if page["blocked"]:
+        raise GoogleBlocked(query)
+    out = []
+    for f in page["results"]:
+        real = f["url"]
+        try:   # Google's /goto links answer with a redirect to the article itself
+            loc = _http.get(real, follow_redirects=False, headers={"User-Agent": BROWSER_UA}).headers.get("location")
+            real = loc if loc and loc.startswith("http") else real
+        except Exception:
+            pass
+        if "google." not in (urlparse(real).hostname or ""):
+            out.append({"url": real, "title": f["title"], "summary": f["snippet"], "published": time.time()})
     return out
 
 

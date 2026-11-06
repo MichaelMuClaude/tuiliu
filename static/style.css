@@ -190,7 +190,7 @@ button { font: inherit; color: inherit; }
   padding: 6px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
 }
 .del.confirm { color: #fff; background: var(--danger); border-color: var(--danger); }
-.status-line { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 20px; }
+.status-line { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 20px; white-space: pre-line; }
 
 /* ---------- chat: a page that slides in from the right ---------- */
 .chat {
