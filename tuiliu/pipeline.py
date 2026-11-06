@@ -22,6 +22,7 @@ WORKERS = 6
 AI_WORKERS = 3     # few, so each card sees the ones written just before it (duplicate check)
 TEXT_LIMIT = 5000  # characters of an article sent to the model, same as the session batches
 MAX_PER_RUN = 200
+SCREEN_BATCH = 100   # titles compared with each other in one screening call
 STALE_NEWS_DAYS = 10
 SEARCH_EVERY_HOURS = 3    # each news topic's keywords are searched in the news this often
 SEARCH_MAX_AGE_DAYS = 3   # older search results are not news any more
@@ -227,9 +228,30 @@ def process(ids: list[int] | None = None, limit: int = MAX_PER_RUN) -> int:
     if not topics:
         return 0
     system, by_id = ai.brief(topics, taste_examples()), {t["id"]: t for t in topics}
-    with ThreadPoolExecutor(AI_WORKERS) as pool:
-        list(pool.map(lambda it: _process_one(it, system, by_id), todo))
+    # Collecting and carding are separate steps: articles pile up in the queue as they are found, good or bad.
+    # Here each batch is first screened by title together (repeats and junk dropped, one article per story),
+    # then the rest are read in full and carded. The next batch is screened against the cards just written.
+    for n in range(0, len(todo), SCREEN_BATCH):
+        batch = _screen(todo[n:n + SCREEN_BATCH], by_id)
+        with ThreadPoolExecutor(AI_WORKERS) as pool:
+            list(pool.map(lambda it: _process_one(it, system, by_id), batch))
     return len(todo)
+
+
+def _screen(items: list[dict], topics: dict[int, dict]) -> list[dict]:
+    """Drop repeats and junk by title before the full read. Returns the items still worth reading."""
+    picked = [it for it in items if it["origin"] != "collection"]   # hand-picked items always get a full read
+    try:
+        drops = ai.screen_titles(picked, recent_card_titles(), topics) if picked else []
+    except Exception as e:
+        log.warning("title screening failed, carding the batch unscreened: %s", e)
+        return items
+    gone = {d["id"]: d["reason"] for d in drops if d["id"] in {it["id"] for it in picked}}
+    with db.tx() as c:
+        for i, reason in gone.items():
+            c.execute("UPDATE items SET status='rejected', reason=? WHERE id=? AND status='ready'", ("筛选：" + reason, i))
+    log.info("screened %d titles, dropped %d", len(items), len(gone))
+    return [it for it in items if it["id"] not in gone]
 
 
 def prune() -> None:

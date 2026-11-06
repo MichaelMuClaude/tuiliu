@@ -69,6 +69,44 @@ ITEM_RULES = """你是「推流」的编辑。推流是一个只给一位读者�
 """
 
 
+SCREEN_SCHEMA = {
+    "type": "object",
+    "properties": {"drops": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"id": {"type": "integer"}, "reason": {"type": "string"}},
+        "required": ["id", "reason"], "additionalProperties": False}}},
+    "required": ["drops"],
+    "additionalProperties": False,
+}
+
+SCREEN_RULES = """你是「推流」的编辑。推流是一个只给一位读者用的私人信息流，每张卡片都是一条干货。下面是新抓来、还没写成卡片的一批文章（只有标题），和最近几天已经写成卡片的标题。写卡片之前，先按标题筛一遍，把不该写的挑出来：
+
+1. 重复：讲同一件事的文章（不同网站报道同一个事件、同一份数据、同一个产品发布，标题不一样也算），只留一篇，其余都挑出来。留哪篇：正文字数多的、原始出处的、讲得具体的。
+2. 已经写过：和「最近已经写成卡片」里某一张讲的是同一件事，又看不出有重要的新进展，挑出来。
+3. 明显不值得写：招聘、纯广告软文、直播/滚动更新页、首页或列表页、只有一句话的快讯、和读者所有话题都无关的。
+
+拿不准的就留下，后面还会读全文再判断。reason 用一句中文说明，重复的写明和哪篇（id 或卡片标题）是同一件事。只列出要挑出来的文章。"""
+
+
+def screen_titles(items: list[dict], recent: list[str], topics: dict[int, dict]) -> list[dict]:
+    """One cheap call over a batch of titles: returns [{id, reason}] for repeats and junk, so only one article per
+    story goes on to be read in full and carded."""
+    lines = "\n".join(f"{it['id']}\t[{topics[it['topic_hint']]['name'] if it['topic_hint'] in topics else '-'}]"
+                      f"\t{it['title']}\t（正文 {len(it['text'])} 字）" for it in items)
+    user = ("## 读者的话题\n" + "、".join(t["name"] for t in topics.values())
+            + "\n\n## 最近已经写成卡片\n" + ("\n".join(f"- {t}" for t in recent) or "（暂无）")
+            + "\n\n## 新文章（id、所属话题、标题、正文字数）\n" + lines)
+    resp = client().messages.create(
+        model=MODEL, max_tokens=16000, system=SCREEN_RULES, messages=[{"role": "user", "content": user}],
+        output_config={"effort": "medium", "format": {"type": "json_schema", "schema": SCREEN_SCHEMA}})
+    u = resp.usage
+    log.info("screen %d titles: %d in, %d out", len(items), u.input_tokens, u.output_tokens)
+    if resp.stop_reason in ("refusal", "max_tokens"):
+        return []
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    return json.loads(text)["drops"]
+
+
 def brief(topics: list[dict], taste: list[str]) -> str:
     """The rules, today's date, the reader's topics and taste. The same text guides the API and session subagents."""
     return (ITEM_RULES
