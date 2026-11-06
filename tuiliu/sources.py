@@ -95,7 +95,7 @@ BROWSER_LOCK = threading.RLock()  # one browser window, shared by the news colle
 _GOOGLE_JS = """(() => {
   const out = [];
   for (const a of document.querySelectorAll('#search a[href]')) {
-    const h = a.querySelector('[role="heading"]');
+    const h = a.querySelector('[role="heading"], h3');   // news results use role=heading, web results h3
     if (!h || out.some(o => o.url === a.href)) continue;
     const lines = a.innerText.split('\\n').map(s => s.trim()).filter(Boolean);
     out.push({ url: a.href, title: h.innerText.trim(), snippet: lines.slice(2).join(' ').slice(0, 400) });
@@ -115,21 +115,16 @@ def browser_running() -> bool:
         return False
 
 
-_GOOGLE_WEB_JS = """(() => {
-  const out = [];
-  for (const h of document.querySelectorAll('#search a h3')) {
-    const a = h.closest('a');
-    if (!a || out.some(o => o.url === a.href)) continue;
-    const box = a.closest('[data-hveid]') || a.parentElement;
-    const snippet = (box ? box.innerText : '').split('\\n').slice(2).join(' ').slice(0, 300);
-    out.push({ url: a.href, title: h.innerText.trim(), snippet });
-  }
-  return JSON.stringify({ blocked: /unusual traffic|not a robot/i.test(document.body.innerText), results: out });
-})()"""
+def use_stealth_engine() -> None:
+    """ai-browser falls back to its 'native' engine (xdotool on a separate window) after a site blocks it, and
+    stays there; reading pages with JavaScript and clicking need the 'stealth' engine back."""
+    if _http.get(f"{AI_BROWSER}/health", timeout=10).json().get("engine") != "stealth":
+        _http.post(f"{AI_BROWSER}/engine", json={"engine": "stealth"}, timeout=30).raise_for_status()
 
 
 def _google_page(url: str, script: str, query: str) -> list[dict]:
     """Open a Google results page in ai-browser and read its results (caller holds BROWSER_LOCK)."""
+    use_stealth_engine()
     _http.post(f"{AI_BROWSER}/navigate", json={"url": url, "return_look": False}, timeout=60).raise_for_status()
     time.sleep(3)   # let the results render
     r = _http.post(f"{AI_BROWSER}/execute_js", json={"script": script}, timeout=30)
@@ -140,11 +135,33 @@ def _google_page(url: str, script: str, query: str) -> list[dict]:
     return page["results"]
 
 
-def google_web(query: str) -> list[dict]:
-    """An ordinary Google search in ai-browser (for the chat): [{title, url, snippet}]."""
+RECENT = {"day": "&tbs=qdr:d", "week": "&tbs=qdr:w", "month": "&tbs=qdr:m"}
+
+
+def _real_links(found: list[dict]) -> list[dict]:
+    """Google wraps every result in a /goto redirect; follow it (one request, no page load) so the AI sees the real
+    site, and drop links that stay inside Google (its own tools and pages)."""
+    out = []
+    for f in found:
+        if "/goto" in f["url"] or "/url?" in f["url"]:
+            try:
+                loc = _http.get(f["url"], follow_redirects=False, timeout=10).headers.get("location", "")
+                if loc.startswith("http"):
+                    f = {**f, "url": loc}
+            except Exception:
+                pass
+        if "google." not in (urlparse(f["url"]).hostname or ""):
+            out.append(f)
+    return out
+
+
+def google_web(query: str, recent: str = "") -> list[dict]:
+    """An ordinary Google search in ai-browser: [{title, url, snippet}]. recent = day | week | month limits the
+    results to pages from that period."""
+    url = f"https://www.google.com/search?q={quote_plus(query)}&hl=en" + RECENT.get(recent, "")
     with BROWSER_LOCK:
-        found = _google_page(f"https://www.google.com/search?q={quote_plus(query)}&hl=en", _GOOGLE_WEB_JS, query)
-    return [f for f in found if "google." not in (urlparse(f["url"]).hostname or "")]
+        found = _google_page(url, _GOOGLE_JS, query)   # web and news results share one layout (2026-11)
+    return _real_links(found)
 
 
 def browser_read(url: str) -> dict:
@@ -163,7 +180,7 @@ def google_news(query: str) -> list[dict]:
     redirects; opening one in the browser lands on the article."""
     url = f"https://www.google.com/search?q={quote_plus(query)}&tbm=nws&hl=en&tbs=qdr:d2"
     with BROWSER_LOCK:
-        return _google_page(url, _GOOGLE_JS, query)
+        return _real_links(_google_page(url, _GOOGLE_JS, query))
 
 
 def search_github(query: str, days: int = 365, min_stars: int = 200) -> list[dict]:

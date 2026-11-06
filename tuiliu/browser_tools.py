@@ -21,8 +21,9 @@ def _schema(props: dict, required: list[str]) -> dict:
 
 
 DEFS = {
-    "google_search": ("用浏览器做一次 Google 搜索，返回结果的标题、链接、摘要。",
-                      _schema({"query": {"type": "string"}}, ["query"])),
+    "google_search": ("用浏览器做一次普通的 Google 搜索，返回结果的标题、链接、摘要。找最新的内容时，用 recent 只看最近一天、一周或一个月的网页。",
+                      _schema({"query": {"type": "string"},
+                               "recent": {"type": "string", "enum": ["day", "week", "month"]}}, ["query"])),
     "google_news": ("用浏览器搜 Google 新闻（最近两天），返回标题、链接、摘要。",
                     _schema({"query": {"type": "string"}}, ["query"])),
     "browser_open": ("用浏览器打开一个网址并读正文（网站拦截时会自动换方式再试）。正文长时分段，part 从 0 开始。",
@@ -56,6 +57,7 @@ class Browser:
         if not self.locked:
             sources.BROWSER_LOCK.acquire()
             self.locked = True
+        sources.use_stealth_engine()
 
     def release(self):
         if self.locked:
@@ -83,7 +85,8 @@ class Browser:
         self._hold()
         if name in ("google_search", "google_news"):
             try:
-                found = (sources.google_web if name == "google_search" else sources.google_news)(a["query"])
+                found = (sources.google_web(a["query"], a.get("recent", "")) if name == "google_search"
+                         else sources.google_news(a["query"]))
             except sources.GoogleBlocked:
                 self.blocked = True
                 return {"error": "captcha: Google 要求验证码，停下，请读者远程处理"}

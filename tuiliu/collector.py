@@ -16,7 +16,7 @@ MAX_SAVED = 8             # articles saved per topic round
 
 RULES = """你是「推流」的新闻采集员。推流是一位读者的私人信息流，读者住在珀斯（西澳）。你用一个真实的 Chrome 浏览器上网，像人一样找新闻：
 
-1. 用话题的关键词搜索：google_news 搜最近两天的新闻，需要时也可以用 google_search 搜普通网页，或换个说法再搜。
+1. 用话题的关键词搜索：先用 google_search 做普通的 Google 搜索（recent 设成 week，只看最近一周的网页），结果不够新、不够多时再用 google_news 搜新闻，或者换个说法再搜。
 2. 看搜索结果，挑出值得读的：一件具体的新事（新闻、优惠、活动、发布、研究），符合这个话题（包括地区），不是广告、招聘、直播页、列表页。
 3. 用 browser_open 打开读一读。确认是完整、具体、免费能读到的文章（不是付费墙、不是只有一两句），就用 save_article 保存。需要时可以点「展开全文」「下一页」、滚动（browser_click、browser_scroll、browser_look），保存的是你最后读到的页面。
 4. 和「已经有的」里讲同一件事的，不要再存；同一件事多家报道，只存最详细的一篇。
@@ -26,7 +26,7 @@ RULES = """你是「推流」的新闻采集员。推流是一位读者的私人
 
 """ + browser_tools.SAFETY
 
-TOOLS = browser_tools.definitions(["google_news", "google_search", "browser_open", "browser_look", "browser_click",
+TOOLS = browser_tools.definitions(["google_search", "google_news", "browser_open", "browser_look", "browser_click",
                                    "browser_scroll"]) + [
     {"name": "save_article", "description": "保存一篇已经读过的文章（用 browser_open 或 browser_look 返回的网址）。",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"],
