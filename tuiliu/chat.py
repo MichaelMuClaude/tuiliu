@@ -13,11 +13,13 @@ import threading
 import time
 
 from . import ai, browser_tools, db, pipeline, sources
-from .config import CHAT_MODEL
+from .config import CHAT_MODEL, SERIES_MODEL
 
 log = logging.getLogger("tuiliu.chat")
 _lock = threading.Lock()   # one turn at a time: turns must be appended in order
 MAX_STEPS = 12             # API calls per turn (tool rounds and pause_turn resumes)
+# Haiku costs five times as much for prompts over 100,000 tokens, so old turns are summarised before that.
+COMPACT_AT = 80_000
 SERIES_CHUNK = 8           # outline entries per card-writing call
 
 SYSTEM = """你是「推流」里的助手。推流是读者自己的私人信息流 App：像刷短视频一样上下滑，每张卡片都是一条干货。读者在刷卡片时左滑就能打开你，你们之间是一段一直延续的对话，你能看到以前聊过的内容。
@@ -257,7 +259,7 @@ def write_series(topic_id: int, name: str, guidance: str, outline: list[dict]) -
         user = (f"专题：{name}\n写法要求：{guidance}\n\n请按顺序为下面每一条写一张卡片：\n"
                 + "\n".join(f"{i + 1}. {o['title']}：{o['about']}" for i, o in enumerate(chunk)))
         resp = ai.client().messages.create(
-            model=CHAT_MODEL, max_tokens=16000, system=SERIES_RULES,
+            model=SERIES_MODEL, max_tokens=16000, system=SERIES_RULES,
             messages=[{"role": "user", "content": user}],
             output_config={"effort": "medium", "format": {"type": "json_schema", "schema": SERIES_SCHEMA}})
         if resp.stop_reason in ("refusal", "max_tokens"):
@@ -306,7 +308,8 @@ def _turn(browser: "browser_tools.Browser") -> list[str]:
             model=CHAT_MODEL, max_tokens=16000, betas=["compact-2026-01-12", "thinking-binding-controls-2026-08-01"],
             system=SYSTEM_BLOCKS, tools=TOOLS, messages=_history(),
             thinking={"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}},
-            context_management={"edits": [{"type": "compact_20260112"}]},
+            context_management={"edits": [{"type": "compact_20260112",
+                                           "trigger": {"type": "input_tokens", "value": COMPACT_AT}}]},
             cache_control={"type": "ephemeral"}, output_config={"effort": "medium"})
         u = resp.usage
         log.info("chat tokens: %d in, %d cache read, %d cache write, %d out", u.input_tokens,
