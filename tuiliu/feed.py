@@ -1,15 +1,16 @@
-"""Choose the next cards to show and learn from feedback. No AI calls here, so swiping stays instant."""
+"""Choose the next cards to show and record what was seen. No AI calls here, so swiping stays instant.
+
+Topics come up at random, all equally often (the user's wish, 2026-11-06: no learned topic weights).
+"""
 import json
 import random
+from collections import defaultdict
 
 from . import db
 
-EXPLORE = 0.15          # share of picks taken at random, so the feed does not narrow over time
-RECENT_WINDOW = 12      # the last cards the reader saw, used to spread topics out
-TOPIC_REPEAT = 0.35     # value multiplier for each time a card's topic is already in that window
-THEME_REPEAT = 0.7      # and for each time its theme is
+RECENT_TOPICS = 6       # a topic among the last few cards seen waits until others have had a turn
 RECYCLE_AFTER_DAYS = 21  # evergreen cards may come back after this long
-WEIGHT_MIN, WEIGHT_MAX = 0.2, 3.0
+WEIGHT_MIN, WEIGHT_MAX = 0.2, 3.0   # only for the topics API; the feed no longer uses weights
 REVIEW_SHARE = 0.08      # about one card in twelve is a favourite coming back for another look
 REVIEW_FIRST_GAP = 3     # days before a favourite first comes back; the gap doubles each time it is shown
 REVIEW_MAX_GAP = 60
@@ -17,8 +18,7 @@ REVIEW_MAX_GAP = 60
 _CARD_SQL = """
 SELECT c.id, c.title, c.points, c.takeaway, c.score, c.evergreen, c.created, c.topic_id,
        c.shown_count, c.last_shown, c.reaction, c.image,
-       COALESCE(t.name, '') AS topic, COALESCE(th.name, '') AS theme, th.id AS theme_id,
-       COALESCE(t.weight, 1) * COALESCE(th.weight, 1) AS weight
+       COALESCE(t.name, '') AS topic, COALESCE(th.name, '') AS theme, th.id AS theme_id
 FROM cards c
 LEFT JOIN topics t ON t.id = c.topic_id
 LEFT JOIN themes th ON th.id = t.theme_id
@@ -34,9 +34,7 @@ def _value(card: dict, now: float) -> float:
         fresh = 1.0
     else:
         fresh = 1.5 if age_days < 2 else (1.0 if age_days < 14 else 0.4)
-    # The square root keeps learned weights (0.2-3) from swamping everything else: a favourite topic gets about
-    # 1.7 times the share of a plain one, not 3 times.
-    return card["score"] / 10 * card["weight"] ** 0.5 * fresh * random.uniform(0.8, 1.2)
+    return card["score"] / 10 * fresh * random.uniform(0.8, 1.2)
 
 
 def next_cards(n: int, exclude: set[int]) -> list[dict]:
@@ -48,22 +46,22 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
                                     " ORDER BY c.last_shown LIMIT 200", (cutoff,)) if c["id"] not in exclude]
     for c in pool:
         c["value"] = _value(c, now) * (0.6 if c["shown_count"] else 1.0)
-    # Topics of the cards seen last; each repeat of a topic (or theme) in that window lowers a card's chance, so the
-    # feed rotates through all topics instead of ping-ponging between the two heaviest (seen 2026-11-06: 39 of 40).
-    recent = db.rows("SELECT t.id AS topic_id, t.theme_id FROM events e JOIN cards c ON c.id = e.card_id"
-                     " JOIN topics t ON t.id = c.topic_id WHERE e.type = 'view' ORDER BY e.id DESC LIMIT ?",
-                     (RECENT_WINDOW,))
+    # Pick a topic at random (each topic equally likely, skipping those among the last few cards seen), then that
+    # topic's best card: its value only orders cards within a topic.
+    by_topic = defaultdict(list)
+    for c in pool:
+        by_topic[c["topic_id"]].append(c)
+    recent = [r["topic_id"] for r in db.rows(
+        "SELECT c.topic_id FROM events e JOIN cards c ON c.id = e.card_id WHERE e.type = 'view'"
+        " ORDER BY e.id DESC LIMIT ?", (RECENT_TOPICS,))]
     picked = []
-    while pool and len(picked) < n:
-        if random.random() < EXPLORE:
-            choice = random.choice(pool)
-        else:
-            window = (picked[::-1] + recent)[:RECENT_WINDOW]
-            topics = [w["topic_id"] for w in window]
-            themes = [w["theme_id"] for w in window]
-            choice = max(pool, key=lambda c: c["value"] * TOPIC_REPEAT ** topics.count(c["topic_id"])
-                         * THEME_REPEAT ** themes.count(c["theme_id"]))
-        pool.remove(choice)
+    while by_topic and len(picked) < n:
+        window = ([c["topic_id"] for c in picked[::-1]] + recent)[:RECENT_TOPICS]
+        topic = random.choice([t for t in by_topic if t not in window] or list(by_topic))
+        choice = max(by_topic[topic], key=lambda c: c["value"])
+        by_topic[topic].remove(choice)
+        if not by_topic[topic]:
+            del by_topic[topic]
         picked.append(choice)
 
     review = _due_favorite(exclude | {c["id"] for c in picked}, now) if random.random() < n * REVIEW_SHARE else None
@@ -86,11 +84,6 @@ def _due_favorite(exclude: set[int], now: float) -> dict | None:
     return min(due, key=lambda c: c["last_shown"]) if due else None
 
 
-def _nudge_topic(c, card_id: int, delta: float) -> None:
-    c.execute("UPDATE topics SET weight = MIN(?, MAX(?, weight + ?))"
-              " WHERE id = (SELECT topic_id FROM cards WHERE id = ?)", (WEIGHT_MAX, WEIGHT_MIN, delta, card_id))
-
-
 def record(card_id: int, kind: str, dwell_ms: int = 0) -> None:
     with db.tx() as c:
         c.execute("INSERT INTO events(card_id, type, dwell_ms, ts) VALUES(?,?,?,?)", (card_id, kind, dwell_ms, db.now()))
@@ -99,15 +92,9 @@ def record(card_id: int, kind: str, dwell_ms: int = 0) -> None:
             return
         if kind == "view":
             c.execute("UPDATE cards SET shown_count = shown_count + 1, last_shown = ? WHERE id = ?", (db.now(), card_id))
-            if dwell_ms > 15000:
-                _nudge_topic(c, card_id, 0.03)
-            elif 0 < dwell_ms < 1500:
-                _nudge_topic(c, card_id, -0.02)
         elif kind in ("like", "dislike", "clear"):
             new = {"like": 1, "dislike": -1, "clear": 0}[kind]
             old = row["reaction"]
             if new == old:
                 return
-            # Undo the old reaction's nudge, then apply the new one.
-            _nudge_topic(c, card_id, -0.15 * old + 0.15 * new)
             c.execute("UPDATE cards SET reaction = ? WHERE id = ?", (new, card_id))
