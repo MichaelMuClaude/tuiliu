@@ -7,10 +7,13 @@ from . import db
 EXPLORE = 0.15          # share of picks taken at random, so the feed does not narrow over time
 RECYCLE_AFTER_DAYS = 21  # evergreen cards may come back after this long
 WEIGHT_MIN, WEIGHT_MAX = 0.2, 3.0
+REVIEW_SHARE = 0.08      # about one card in twelve is a favourite coming back for another look
+REVIEW_FIRST_GAP = 3     # days before a favourite first comes back; the gap doubles each time it is shown
+REVIEW_MAX_GAP = 60
 
 _CARD_SQL = """
 SELECT c.id, c.title, c.points, c.takeaway, c.score, c.evergreen, c.created, c.topic_id,
-       c.shown_count, c.reaction, c.image,
+       c.shown_count, c.last_shown, c.reaction, c.image,
        COALESCE(t.name, '') AS topic, COALESCE(th.name, '') AS theme, th.id AS theme_id,
        COALESCE(t.weight, 1) * COALESCE(th.weight, 1) AS weight
 FROM cards c
@@ -54,10 +57,24 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
         picked.append(choice)
         last_topic, last_theme = choice["topic_id"], choice["theme_id"]
 
+    review = _due_favorite(exclude | {c["id"] for c in picked}, now) if random.random() < n * REVIEW_SHARE else None
+    if review:
+        picked.insert(random.randrange(1, len(picked) + 1) if picked else 0, review)
+
     return [{
         "id": c["id"], "title": c["title"], "points": json.loads(c["points"]), "takeaway": c["takeaway"],
         "topic": c["topic"], "theme": c["theme"], "reaction": c["reaction"], "image": c["image"],
+        "review": c is review,
     } for c in picked]
+
+
+def _due_favorite(exclude: set[int], now: float) -> dict | None:
+    """A favourite the reader has not seen for a while (spaced: 3, 6, 12... days), so favourites resurface in the feed
+    instead of waiting in the favourites list."""
+    due = [c for c in db.rows(_CARD_SQL.replace("WHERE c.reaction >= 0", "WHERE c.reaction = 1"))
+           if c["id"] not in exclude and now - c["last_shown"] >
+           min(REVIEW_MAX_GAP, REVIEW_FIRST_GAP * 2 ** max(0, c["shown_count"] - 1)) * 86400]
+    return min(due, key=lambda c: c["last_shown"]) if due else None
 
 
 def _nudge_topic(c, card_id: int, delta: float) -> None:
