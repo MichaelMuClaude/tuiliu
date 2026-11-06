@@ -141,19 +141,7 @@ def cmd_set_kind(a):
 
 def cmd_cards(a):
     """A series of cards written from the session's own knowledge (e.g. 100 small-talk tips)."""
-    n = 0
-    with db.tx() as c:
-        for path in a.files:
-            for k in json.loads(Path(path).read_text()):
-                points = pipeline._as_points(k.get("points"))
-                if not k.get("title", "").strip() or not points:
-                    continue
-                c.execute("INSERT INTO cards(item_id, topic_id, title, points, takeaway, score, evergreen, created, image)"
-                          " VALUES(NULL,?,?,?,?,?,?,?,?)",
-                          (a.topic, k["title"].strip(), json.dumps(points[:4], ensure_ascii=False),
-                           k.get("takeaway", "").strip(), k.get("score", 7), int(k.get("evergreen", True)),
-                           db.now() + n * 1e-3, k.get("image", "")))
-                n += 1
+    n = sum(pipeline.add_written_cards(a.topic, json.loads(Path(path).read_text())) for path in a.files)
     print(f"added {n} cards", json.dumps(pipeline.stats(), ensure_ascii=False))
 
 

@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, db, feed, pipeline, seed, work
+from . import ai, chat, db, feed, pipeline, seed, work
 from .config import HOST, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -196,6 +196,36 @@ def delete_theme(theme_id: int):
     with db.tx() as c:
         c.execute("DELETE FROM themes WHERE id=?", (theme_id,))
     return {"ok": True}
+
+
+class ChatIn(BaseModel):
+    message: str
+    card_id: int | None = None
+
+
+@app.get("/api/chat")
+def get_chat():
+    return {"messages": chat.shown_history(), "job": db.get_meta("series_job"), "has_key": has_api_key()}
+
+
+@app.post("/api/chat")
+def post_chat(body: ChatIn):
+    text = body.message.strip()
+    if not text:
+        raise HTTPException(400, "empty message")
+    if not has_api_key():
+        raise HTTPException(503, "没有 API key，聊天用不了")
+    card = None
+    if body.card_id:
+        card = db.one("SELECT title, points, takeaway FROM cards WHERE id=?", (body.card_id,))
+        if card:
+            card["points"] = json.loads(card["points"])
+    try:
+        replies = chat.send(text, card)
+    except Exception as e:
+        log.exception("chat failed")
+        raise HTTPException(502, f"出错了：{e}")
+    return {"replies": replies, "job": db.get_meta("series_job")}
 
 
 @app.get("/api/status")

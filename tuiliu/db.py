@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS events (
     dwell_ms INTEGER DEFAULT 0,
     ts REAL
 );
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY,
+    role TEXT NOT NULL,              -- user | assistant | system, as sent to the API
+    content TEXT NOT NULL,           -- JSON content blocks, passed back unchanged (thinking, compaction)
+    display TEXT DEFAULT '',         -- what the chat page shows; '' for tool results
+    created REAL
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 

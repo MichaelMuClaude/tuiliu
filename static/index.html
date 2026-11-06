@@ -15,7 +15,7 @@
 </head>
 <body>
 <main id="stage" class="stage" aria-live="polite"></main>
-<p id="hint" class="hint" hidden>上滑看下一张 · 下滑看话题和收藏 · 双击收藏</p>
+<p id="hint" class="hint" hidden>上滑看下一张 · 下滑看话题和收藏 · 左滑和助手聊天 · 双击收藏</p>
 
 <div id="toast" class="toast" role="status"></div>
 
@@ -42,6 +42,20 @@
   </button>
 </section>
 
-<script src="/static/app.js"></script>
+<section id="chat" class="chat" aria-hidden="true">
+  <header class="chat-head">
+    <button id="closeChat" class="back" aria-label="回到卡片">‹ 卡片</button>
+    <b>推流助手</b>
+    <span class="spacer"></span>
+  </header>
+  <div id="chatLog" class="chat-log"></div>
+  <div id="chatCard" class="chat-card" hidden><span></span><button type="button" aria-label="不带这张卡片">✕</button></div>
+  <form id="chatForm" class="chat-form">
+    <textarea id="chatInput" rows="1" placeholder="想看什么新闻、做什么专题？"></textarea>
+    <button type="submit" class="primary">发送</button>
+  </form>
+</section>
+
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

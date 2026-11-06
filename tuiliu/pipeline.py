@@ -124,6 +124,23 @@ def _as_points(points) -> list[str]:
     return [re.sub(r"^[-•\d.、)\s]+", "", p) for p in parts]
 
 
+def add_written_cards(topic_id: int, cards: list[dict]) -> int:
+    """Cards written without a source article (a series from a session or the chat). Returns how many were added."""
+    n = 0
+    with db.tx() as c:
+        for k in cards:
+            points = _as_points(k.get("points"))
+            if not k.get("title", "").strip() or not points:
+                continue
+            c.execute("INSERT INTO cards(item_id, topic_id, title, points, takeaway, score, evergreen, created, image)"
+                      " VALUES(NULL,?,?,?,?,?,?,?,?)",
+                      (topic_id, k["title"].strip(), json.dumps(points[:4], ensure_ascii=False),
+                       k.get("takeaway", "").strip(), k.get("score", 7), int(k.get("evergreen", True)),
+                       db.now() + n * 1e-3, k.get("image", "")))
+            n += 1
+    return n
+
+
 def apply_result(item_id: int, res: dict | None, valid_topics: set[int]) -> str:
     """Store one judgement (from the API or from a Claude session). Returns the new item status."""
     with db.tx() as c:
@@ -154,18 +171,19 @@ def apply_result(item_id: int, res: dict | None, valid_topics: set[int]) -> str:
         return "carded"
 
 
-def _process_one(item: dict, system: str, valid: set[int]) -> None:
+def _process_one(item: dict, system: str, topics: dict[int, dict]) -> None:
     try:
         # Read the recent titles per item, so a story carded a moment ago by another worker counts too.
+        hint = topics.get(item["topic_hint"])
         res = ai.judge_and_write(item["title"], item["text"][:TEXT_LIMIT], system, recent_card_titles(),
-                                 item["origin"] == "collection")
+                                 item["origin"] == "collection", hint)
     except Exception as e:
         log.warning("AI failed for %s: %s", item["title"][:40], e)
         with db.tx() as c:
             c.execute("UPDATE items SET attempts=attempts+1,"
                       " status=CASE WHEN attempts>=2 THEN 'failed' ELSE status END WHERE id=?", (item["id"],))
         return
-    apply_result(item["id"], res, valid)
+    apply_result(item["id"], res, set(topics))
 
 
 def process(ids: list[int] | None = None, limit: int = MAX_PER_RUN) -> int:
@@ -174,18 +192,18 @@ def process(ids: list[int] | None = None, limit: int = MAX_PER_RUN) -> int:
         return 0
     if ids is None:
         # Fresh feed items first, then hand-picked Collection items, then backfill.
-        todo = db.rows("SELECT id, title, text, origin FROM items WHERE status='ready'"
+        todo = db.rows("SELECT id, title, text, origin, topic_hint FROM items WHERE status='ready'"
                        " ORDER BY CASE origin WHEN 'feed' THEN 0 WHEN 'collection' THEN 1 ELSE 2 END,"
                        " published DESC LIMIT ?", (limit,))
     else:
         marks = ",".join("?" * len(ids)) or "NULL"
-        todo = db.rows(f"SELECT id, title, text, origin FROM items WHERE status='ready' AND id IN ({marks})", ids)
+        todo = db.rows(f"SELECT id, title, text, origin, topic_hint FROM items WHERE status='ready' AND id IN ({marks})", ids)
     topics = active_topics()
     if not topics:
         return 0
-    system, valid = ai.brief(topics, taste_examples()), {t["id"] for t in topics}
+    system, by_id = ai.brief(topics, taste_examples()), {t["id"]: t for t in topics}
     with ThreadPoolExecutor(AI_WORKERS) as pool:
-        list(pool.map(lambda it: _process_one(it, system, valid), todo))
+        list(pool.map(lambda it: _process_one(it, system, by_id), todo))
     return len(todo)
 
 

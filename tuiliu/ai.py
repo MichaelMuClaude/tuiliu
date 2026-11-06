@@ -64,6 +64,7 @@ ITEM_RULES = """你是「推流」的编辑。推流是一个只给一位读者�
 - 投资、公司类话题：只写事实（数字、合同、财报、事件）和有出处的观点，观点要写明是谁说的（某分析师、某基金认为），不写「值得买」「该卖」这类建议；荐股文、目标价喊单只提取其中的事实，没有事实就 keep=false。
 - 「谈资」类话题（话题描述里有谈资、闲聊、本地新鲜事）换一把尺子：不要求能照做，看的是有没有意思、身边的人会不会聊、能不能让读者跟上周围正在发生的事。本地趣闻、奇怪的研究发现、生活常识、大家都在讨论的新闻，只要讲得清楚就值得推；同一件事只推写得最好的一篇。犯罪细节、庭审过程、赛马赛况流水账、纯政治口水仍然不推。
 - 「打折、薅羊毛」类话题：优惠信息本身就是干货，不当软文处理。只推真正划算的（明显低于平时价、免费、限时福利），写清价格、原价或折扣、怎么拿（优惠码、门店、条件）、截止时间和限制（限州、限会员、需订阅）；只对某个州有效的，写明州名。贵价奢侈品、普通的小折扣、需要先花大钱才能返现的，一律 keep=false。evergreen 一律 false。
+- 话题的名称或描述限定了地区（珀斯、西澳）时，只推和这个地区有关的内容：其他城市、其他州的房产、新闻、活动一律 keep=false；全国性的政策、利率、法规变化会影响到这个地区的，可以推。
 - topic_id：选最贴切的一个话题 id；keep=false 时如果都不相关就填 0。
 - evergreen：一年后读仍然有价值（工具介绍、方法、案例、知识）为 true；时效性新闻为 false。
 - reason：一句话说明判断理由。
@@ -109,9 +110,14 @@ def _call(system: str, user: str, schema: dict, max_tokens: int = 4000) -> dict 
     return json.loads(text)
 
 
-def judge_and_write(title: str, text: str, system: str, recent: list[str], hand_picked: bool) -> dict | None:
-    """system comes from brief(); recent lists titles of cards already written, so repeats are rejected."""
+def judge_and_write(title: str, text: str, system: str, recent: list[str], hand_picked: bool,
+                    for_topic: dict | None = None) -> dict | None:
+    """system comes from brief(); recent lists titles of cards already written, so repeats are rejected.
+    for_topic is the topic whose own feed or search found the article: it is only kept if it fits that topic."""
     note = "这篇是读者自己亲手收藏的文章，默认值得推，除非内容实在太空。\n\n" if hand_picked else ""
+    if for_topic:
+        note += (f"这篇是专门为话题「{for_topic['name']}：{for_topic['description']}」找来的，卡片会放进这个话题。"
+                 "内容不符合这个话题（包括地区不对）就 keep=false。\n\n")
     seen = ("## 最近已经写过的卡片\n如果这篇讲的是下面某张卡片已经讲过的同一件事，又没有重要的新信息，就 keep=false，"
             "reason 写「重复」。\n" + "\n".join(f"- {t}" for t in recent) + "\n\n") if recent else ""
     user = f"{seen}{note}## 这篇内容\n标题：{title}\n\n正文：\n{text}"

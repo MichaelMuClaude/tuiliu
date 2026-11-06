@@ -9,7 +9,8 @@ STATIC_DIR = ROOT / "static"
 CONFIG_DIR = Path.home() / ".config" / "tuiliu"
 COLLECTION_DIR = Path(os.environ.get("TUILIU_COLLECTION", Path.home() / "pCloudDrive" / "Collection"))
 
-MODEL = "claude-haiku-5-5"
+MODEL = "claude-haiku-5-5"          # judges articles and writes their cards
+CHAT_MODEL = "claude-sonnet-5-5"    # the in-app chat, and series of cards it writes
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("TUILIU_PORT", "8095"))
 PIPELINE_INTERVAL_MIN = 45
