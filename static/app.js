@@ -68,6 +68,35 @@ function heart(cls) {
   return s;
 }
 
+// The card as plain text, for pasting into a message or a note.
+function cardText(c) {
+  return [c.title, c.points.map(p => `• ${p}`).join("\n"), c.takeaway ? `💡 ${c.takeaway}` : ""]
+    .filter(Boolean).join("\n\n");
+}
+
+async function copyCard(c) {
+  const text = cardText(c);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {   // older browsers, or the clipboard API refused: copy through a hidden text box
+    const ta = h("textarea", { readonly: "" });
+    ta.value = text;
+    ta.style.cssText = "position:fixed;opacity:0;top:0";
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (!ok) { toast("复制失败"); return; }
+  }
+  toast("已复制卡片文字");
+}
+
+function copyButton(c) {
+  const b = h("button", { class: "copy", type: "button", "aria-label": "复制卡片文字" }, "复制");
+  b.addEventListener("click", () => copyCard(c));   // mouse; taps on the card stage are handled in touchend
+  return b;
+}
+
 function cardSlide(c) {
   const label = [c.theme, c.topic].filter(Boolean).join(" · ");
   return h("section", { class: "slide" },
@@ -77,7 +106,8 @@ function cardSlide(c) {
       c.image ? h("img", { class: "card-img", src: c.image, alt: "" }) : null,
       h("h1", {}, c.title),
       h("ul", { class: "points" }, c.points.map(p => h("li", {}, p))),
-      c.takeaway ? h("p", { class: "takeaway" }, "💡 ", c.takeaway) : null));
+      c.takeaway ? h("p", { class: "takeaway" }, "💡 ", c.takeaway) : null,
+      h("div", { class: "card-foot" }, copyButton(c))));
 }
 
 function noticeSlide(title, text, spinning) {
@@ -245,6 +275,11 @@ stage.addEventListener("touchend", e => {
   lastTouchEnd = now;
   if (moved < 12 && now - t0 < 300) {             // a quick tap; two in a row is a double tap
     e.preventDefault();                           // no emulated mouse clicks / dblclick afterwards
+    if (e.target.closest && e.target.closest(".copy") && current && !current.notice) {
+      copyCard(current.card);
+      lastTap = null;
+      return;
+    }
     const { clientX: x, clientY: y } = e.changedTouches[0];
     if (lastTap && now - lastTap.t < 350 && Math.hypot(x - lastTap.x, y - lastTap.y) < 50) {
       lastTap = null;
@@ -422,7 +457,7 @@ async function renderFavorites() {
       h("h4", {}, c.title),
       h("ul", {}, c.points.map(p => h("li", {}, p))),
       c.takeaway ? h("p", { class: "take" }, "💡 ", c.takeaway) : null,
-      h("div", { class: "fav-foot" }, remove));
+      h("div", { class: "fav-foot" }, copyButton(c), remove));
     remove.addEventListener("click", async () => {
       await postEvent(c.id, "clear");
       if (current && current.card && current.card.id === c.id) {

@@ -133,7 +133,7 @@ button { font: inherit; color: inherit; }
 .fav ul { margin: 0; padding-left: 18px; color: var(--text); font-size: 14.5px; line-height: 1.65; }
 .fav li { margin-bottom: 4px; }
 .fav .take { margin: 8px 0 0; font-size: 14px; color: var(--muted); line-height: 1.6; }
-.fav-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
+.fav-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .empty { text-align: center; color: var(--muted); padding: 40px 12px; line-height: 1.8; }
 
 /* double-tap favourite */
@@ -236,3 +236,10 @@ button { font: inherit; color: inherit; }
   background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px; line-height: 1.4;
 }
 .chat-form .primary { height: 40px; }
+
+/* copy the card's text */
+.card-foot { display: flex; justify-content: flex-end; margin-top: -4px; }
+.copy {
+  flex: none; background: none; border: 1px solid var(--line); border-radius: 10px;
+  padding: 6px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
+}
