@@ -5,6 +5,9 @@ import random
 from . import db
 
 EXPLORE = 0.15          # share of picks taken at random, so the feed does not narrow over time
+RECENT_WINDOW = 12      # the last cards the reader saw, used to spread topics out
+TOPIC_REPEAT = 0.35     # value multiplier for each time a card's topic is already in that window
+THEME_REPEAT = 0.7      # and for each time its theme is
 RECYCLE_AFTER_DAYS = 21  # evergreen cards may come back after this long
 WEIGHT_MIN, WEIGHT_MAX = 0.2, 3.0
 REVIEW_SHARE = 0.08      # about one card in twelve is a favourite coming back for another look
@@ -31,7 +34,9 @@ def _value(card: dict, now: float) -> float:
         fresh = 1.0
     else:
         fresh = 1.5 if age_days < 2 else (1.0 if age_days < 14 else 0.4)
-    return card["score"] / 10 * card["weight"] * fresh * random.uniform(0.8, 1.2)
+    # The square root keeps learned weights (0.2-3) from swamping everything else: a favourite topic gets about
+    # 1.7 times the share of a plain one, not 3 times.
+    return card["score"] / 10 * card["weight"] ** 0.5 * fresh * random.uniform(0.8, 1.2)
 
 
 def next_cards(n: int, exclude: set[int]) -> list[dict]:
@@ -43,19 +48,23 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
                                     " ORDER BY c.last_shown LIMIT 200", (cutoff,)) if c["id"] not in exclude]
     for c in pool:
         c["value"] = _value(c, now) * (0.6 if c["shown_count"] else 1.0)
-    pool.sort(key=lambda c: c["value"], reverse=True)
-
-    picked, last_topic, last_theme = [], None, None
+    # Topics of the cards seen last; each repeat of a topic (or theme) in that window lowers a card's chance, so the
+    # feed rotates through all topics instead of ping-ponging between the two heaviest (seen 2026-11-06: 39 of 40).
+    recent = db.rows("SELECT t.id AS topic_id, t.theme_id FROM events e JOIN cards c ON c.id = e.card_id"
+                     " JOIN topics t ON t.id = c.topic_id WHERE e.type = 'view' ORDER BY e.id DESC LIMIT ?",
+                     (RECENT_WINDOW,))
+    picked = []
     while pool and len(picked) < n:
         if random.random() < EXPLORE:
             choice = random.choice(pool)
         else:
-            # Topic rotation: the best card whose topic (ideally theme) differs from the previous one.
-            choice = next((c for c in pool if c["theme_id"] != last_theme), None) \
-                or next((c for c in pool if c["topic_id"] != last_topic), pool[0])
+            window = (picked[::-1] + recent)[:RECENT_WINDOW]
+            topics = [w["topic_id"] for w in window]
+            themes = [w["theme_id"] for w in window]
+            choice = max(pool, key=lambda c: c["value"] * TOPIC_REPEAT ** topics.count(c["topic_id"])
+                         * THEME_REPEAT ** themes.count(c["theme_id"]))
         pool.remove(choice)
         picked.append(choice)
-        last_topic, last_theme = choice["topic_id"], choice["theme_id"]
 
     review = _due_favorite(exclude | {c["id"] for c in picked}, now) if random.random() < n * REVIEW_SHARE else None
     if review:
