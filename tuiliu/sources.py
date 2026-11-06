@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import quote_plus, urlparse
 
 import feedparser
 import httpx
@@ -16,7 +16,6 @@ import yaml
 from .config import COLLECTION_DIR, USER_AGENT
 
 MAX_TEXT = 15000
-BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 _http = httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True)
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -85,27 +84,10 @@ def search_hn(query: str, days: int = 180, min_points: int = 30) -> list[dict]:
                               f"&numericFilters=points>{min_points},created_at_i>{since}")
 
 
-def search_news(query: str) -> list[dict]:
-    """Newest news articles for a keyword, from Bing News search (its RSS output, sorted by date). Free, no key."""
-    r = _http.get(f"https://www.bing.com/news/search?q={quote_plus(query)}&format=rss&qft=sortbydate%3d%221%22",
-                  headers={"User-Agent": BROWSER_UA})
-    r.raise_for_status()
-    out = []
-    for e in feedparser.parse(r.content).entries:
-        link = e.get("link", "")
-        # Bing wraps each link in a click-tracking redirect; the article address is its url parameter.
-        real = parse_qs(urlparse(link).query).get("url", [link])[0]
-        ts = e.get("published_parsed")
-        if real.startswith("http") and e.get("title"):
-            out.append({"url": real, "title": strip_html(e.title), "summary": strip_html(e.get("summary", "")),
-                        "published": calendar.timegm(ts) if ts else time.time()})
-    return out
-
-
-# ---------- Google News through ai-browser ----------
+# ---------- ai-browser: Google and web pages in a real Chrome ----------
 # Google blocks headless and fresh automated browsers at once, but answers ai-browser: a long-lived, visible Chrome
-# (its own profile, which can be signed in to Google) driven over HTTP on 127.0.0.1:8888. When Google asks for a
-# CAPTCHA the user solves it by hand over remote desktop; until then Bing News alone is used.
+# (its own profile, which can be signed in to Google) driven over HTTP on 127.0.0.1:8888. The news collector and
+# the chat use it like a person would. When Google asks for a CAPTCHA the user solves it over remote desktop.
 
 AI_BROWSER = "http://127.0.0.1:8888/api"
 BROWSER_LOCK = threading.Lock()   # one browser window, shared by the Google News pass and the chat: one user at a time
@@ -176,22 +158,12 @@ def browser_read(url: str) -> dict:
     return {"title": n.get("title", ""), "url": n.get("url", url), "blocked": n.get("blocked", False), "text": text}
 
 
-def search_google_news(query: str) -> list[dict]:
-    """News from the past day for one query, read from Google's results page in ai-browser."""
-    url = f"https://www.google.com/search?q={quote_plus(query)}&tbm=nws&hl=en&tbs=qdr:d"
+def google_news(query: str) -> list[dict]:
+    """Google News results from the past two days for one query: [{title, url, snippet}]. The links are Google
+    redirects; opening one in the browser lands on the article."""
+    url = f"https://www.google.com/search?q={quote_plus(query)}&tbm=nws&hl=en&tbs=qdr:d2"
     with BROWSER_LOCK:
-        found = _google_page(url, _GOOGLE_JS, query)
-    out = []
-    for f in found:
-        real = f["url"]
-        try:   # Google's /goto links answer with a redirect to the article itself
-            loc = _http.get(real, follow_redirects=False, headers={"User-Agent": BROWSER_UA}).headers.get("location")
-            real = loc if loc and loc.startswith("http") else real
-        except Exception:
-            pass
-        if "google." not in (urlparse(real).hostname or ""):
-            out.append({"url": real, "title": f["title"], "summary": f["snippet"], "published": time.time()})
-    return out
+        return _google_page(url, _GOOGLE_JS, query)
 
 
 def search_github(query: str, days: int = 365, min_stars: int = 200) -> list[dict]:

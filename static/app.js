@@ -421,7 +421,7 @@ async function renderTopics() {
     const s = st.stats;
     document.getElementById("statusLine").textContent =
       `还有 ${s.unseen_cards || 0} 张没看过的卡片 · ${(s.ready || 0) + (s.new || 0)} 篇文章等着写成卡片` +
-      (st.google_blocked ? "\n⚠ Google 要求验证：用远程桌面连上 Surface，在 AI 浏览器的 Chrome 窗口里点一下验证码。修好前只用 Bing 搜索。" : "");
+      (st.google_blocked ? "\n⚠ Google 要求验证：用远程桌面连上 Surface，在 AI 浏览器的 Chrome 窗口里点一下验证码。点好之前暂停采集新闻。" : "");
   }
 }
 

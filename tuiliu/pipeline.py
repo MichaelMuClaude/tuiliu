@@ -24,11 +24,6 @@ TEXT_LIMIT = 5000  # characters of an article sent to the model, same as the ses
 MAX_PER_RUN = 200
 SCREEN_BATCH = 100   # titles compared with each other in one screening call
 STALE_NEWS_DAYS = 10
-SEARCH_EVERY_HOURS = 3    # each news topic's keywords are searched in the news this often
-SEARCH_MAX_AGE_DAYS = 3   # older search results are not news any more
-GOOGLE_EVERY_HOURS = 6    # Google News (through Nobrowser) is searched less often, to stay clear of its CAPTCHA
-GOOGLE_KEYWORDS = 4       # first keywords of each topic searched on Google
-GOOGLE_PAUSE = 10         # seconds between Google searches
 
 
 def _insert_items(found: list[dict], source_id: int | None, origin: str, topic_hint: int | None = None) -> list[int]:
@@ -72,57 +67,6 @@ def fetch_sources(force: bool = False) -> int:
             c.execute("UPDATE sources SET last_fetched=? WHERE id=?", (db.now(), s["id"]))
     return total
 
-
-def search_topics(force: bool = False) -> int:
-    """Search the news for every keyword of every news topic (Bing News, free). Feeds alone miss too much:
-    this is the main source of news. Each topic is searched every SEARCH_EVERY_HOURS; only recent articles count."""
-    total = 0
-    since = db.now() - SEARCH_MAX_AGE_DAYS * 86400
-    for t in active_topics():
-        key = f"searched_{t['id']}"
-        if not force and db.now() - (db.get_meta(key, 0) or 0) < SEARCH_EVERY_HOURS * 3600:
-            continue
-        found = []
-        for kw in json.loads(t["keywords"] or "[]")[:8]:
-            try:
-                found += [f for f in sources.search_news(kw) if f["published"] >= since]
-            except Exception as e:
-                log.warning("news search failed %s %s: %s", t["name"], kw, e)
-            time.sleep(1)   # be gentle with the search engine
-        db.set_meta(key, db.now())
-        n = len(_insert_items(found, None, "feed", t["id"]))
-        total += n
-        log.info("searched %-20s %3d found, %3d new", t["name"], len(found), n)
-    return total + search_google(force)
-
-
-def search_google(force: bool = False) -> int:
-    """Google News through ai-browser, every GOOGLE_EVERY_HOURS. Stops at the first CAPTCHA and records it
-    (meta google_blocked), so the app can ask the user to solve it over remote desktop; Bing keeps working meanwhile."""
-    if not force and db.now() - (db.get_meta("google_searched", 0) or 0) < GOOGLE_EVERY_HOURS * 3600:
-        return 0
-    if not sources.browser_running():
-        log.info("ai-browser is not running: no Google search this time")
-        return 0
-    db.set_meta("google_searched", db.now())
-    total = 0
-    for t in active_topics():
-        found = []
-        for kw in json.loads(t["keywords"] or "[]")[:GOOGLE_KEYWORDS]:
-            try:
-                found += sources.search_google_news(kw)
-            except sources.GoogleBlocked:
-                db.set_meta("google_blocked", db.now())
-                log.warning("Google asks for a CAPTCHA; solve it in ai-browser's Chrome over remote desktop")
-                return total + len(_insert_items(found, None, "feed", t["id"]))
-            except Exception as e:
-                log.warning("Google search failed %s %s: %s", t["name"], kw, e)
-            time.sleep(GOOGLE_PAUSE)
-        n = len(_insert_items(found, None, "feed", t["id"]))
-        total += n
-        log.info("google   %-20s %3d found, %3d new", t["name"], len(found), n)
-    db.set_meta("google_blocked", 0)
-    return total
 
 def _fill_one(item: dict) -> None:
     text = item["summary"] if len(item["summary"]) >= 1200 else ""
@@ -296,19 +240,17 @@ def prune() -> None:
 
 
 def backfill_topic(topic_id: int, github: bool = True) -> int:
-    """Search the news, HN and GitHub for one topic's keywords, so a new topic gets cards within minutes.
-    github=False for topics that are not about software (a company, local news)."""
+    """Fill a new news topic straight away: the AI collector searches and reads for it now, and HN and GitHub are
+    searched for its English keywords. github=False for topics that are not about software."""
+    from . import collector
     t = db.one("SELECT * FROM topics WHERE id=?", (topic_id,))
     if not t or t["kind"] != "news":
         return 0
+    if has_api_key() and sources.browser_running():
+        db.set_meta(f"collected_{topic_id}", db.now())
+        collector.collect_topic(t)
     found = []
-    since = db.now() - SEARCH_MAX_AGE_DAYS * 86400
-    for kw in json.loads(t["keywords"] or "[]")[:8]:
-        try:
-            found += [f for f in sources.search_news(kw) if f["published"] >= since]
-        except Exception as e:
-            log.warning("backfill news search failed %s: %s", kw, e)
-        db.set_meta(f"searched_{topic_id}", db.now())
+    for kw in json.loads(t["keywords"] or "[]")[:6]:
         if not kw.isascii():
             continue  # HN and GitHub search work best with English keywords
         for fn in (sources.search_hn, sources.search_github) if github else (sources.search_hn,):
@@ -319,7 +261,8 @@ def backfill_topic(topic_id: int, github: bool = True) -> int:
     ids = _insert_items(found, None, "backfill", topic_id)
     log.info("backfill topic %s: %d found, %d new", t["name"], len(found), len(ids))
     fill_text(ids)
-    process(ids)  # no-op without an API key; the items wait in the queue
+    # Cards for this topic's queue, the collector's articles included (no-op without an API key).
+    process([r["id"] for r in db.rows("SELECT id FROM items WHERE topic_hint=? AND status='ready'", (topic_id,))])
     return len(ids)
 
 
@@ -329,7 +272,8 @@ def run_once(force: bool = False) -> bool:
     try:
         db.set_meta("pipeline_running", True)
         fetch_sources(force)
-        search_topics()
+        from . import collector   # imported here: the collector uses this module
+        collector.collect()
         fill_text()
         process()
         prune()
