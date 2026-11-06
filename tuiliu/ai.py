@@ -1,10 +1,13 @@
 """Claude calls: judge an item and write its cards, and turn a topic description into search keywords."""
 import json
+import logging
+import time
 
 import anthropic
 
 from .config import MODEL
 
+log = logging.getLogger("tuiliu.ai")
 _client = None
 
 
@@ -77,29 +80,41 @@ ITEM_RULES = """你是「推流」的编辑。推流是一个只给一位读者�
 """
 
 
+def brief(topics: list[dict], taste: list[str]) -> str:
+    """The rules, today's date, the reader's topics and taste. The same text guides the API and session subagents."""
+    return (ITEM_RULES
+            + f"\n今天是 {time.strftime('%Y-%m-%d %A')}。活动类内容只写还没过去的场次，并写清日期。\n"
+            + "\n## 读者的话题\n"
+            + "\n".join(f"- id={t['id']}：{t['theme']} / {t['name']}：{t['description']}" for t in topics)
+            + "\n\n## 读者收藏或点过喜欢的内容（代表他的口味）\n"
+            + ("\n".join(f"- {t}" for t in taste) or "（暂无）"))
+
+
 def _call(system: str, user: str, schema: dict, max_tokens: int = 4000) -> dict | None:
     resp = client().messages.create(
         model=MODEL,
         max_tokens=max_tokens,
-        system=system,
+        # The brief is the same for every article in a run, so cache it.
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user}],
         thinking={"type": "disabled"},
         output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
     )
+    u = resp.usage
+    log.info("tokens: %d in, %d cache read, %d cache write, %d out", u.input_tokens,
+             u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0, u.output_tokens)
     if resp.stop_reason in ("refusal", "max_tokens"):
         return None
     text = next((b.text for b in resp.content if b.type == "text"), "")
     return json.loads(text)
 
 
-def judge_and_write(title: str, text: str, topics: list[dict], taste: list[str], hand_picked: bool) -> dict | None:
-    topic_lines = "\n".join(f"- id={t['id']}：{t['theme']} / {t['name']}：{t['description']}" for t in topics)
-    taste_lines = "\n".join(f"- {t}" for t in taste) or "（暂无）"
-    system = (ITEM_RULES
-              + "\n## 读者的话题\n" + topic_lines
-              + "\n\n## 读者收藏或点过喜欢的内容（代表他的口味）\n" + taste_lines)
+def judge_and_write(title: str, text: str, system: str, recent: list[str], hand_picked: bool) -> dict | None:
+    """system comes from brief(); recent lists titles of cards already written, so repeats are rejected."""
     note = "这篇是读者自己亲手收藏的文章，默认值得推，除非内容实在太空。\n\n" if hand_picked else ""
-    user = f"{note}标题：{title}\n\n正文：\n{text}"
+    seen = ("## 最近已经写过的卡片\n如果这篇讲的是下面某张卡片已经讲过的同一件事，又没有重要的新信息，就 keep=false，"
+            "reason 写「重复」。\n" + "\n".join(f"- {t}" for t in recent) + "\n\n") if recent else ""
+    user = f"{seen}{note}## 这篇内容\n标题：{title}\n\n正文：\n{text}"
     return _call(system, user, ITEM_SCHEMA)
 
 

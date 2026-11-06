@@ -10,7 +10,8 @@
     python -m tuiliu.work set-topic ID --theme NAME --name NAME --description TEXT --keywords JSON
     python -m tuiliu.work backfill ID                       # search HN/GitHub for a topic (no AI)
     python -m tuiliu.work add-url --topic ID URL [URL ...]  # queue pages found by web search
-    python -m tuiliu.work add-topic --theme NAME --name NAME --description TEXT [--keywords JSON]
+    python -m tuiliu.work add-topic --theme NAME --name NAME --description TEXT [--keywords JSON] [--kind series]
+    python -m tuiliu.work set-kind ID news|series                # news: fed by sources; series: written once
     python -m tuiliu.work cards --topic ID FILE.json [...]  # cards the session wrote itself, no source article
     python -m tuiliu.work sources                           # list feeds
     python -m tuiliu.work add-source URL --name NAME [--topic ID]
@@ -20,12 +21,10 @@ import argparse
 import html
 import json
 import re
-import time
 from pathlib import Path
 
 from . import ai, db, pipeline, seed, sources
 
-TEXT_LIMIT = 5000
 PENDING_THEME = "新话题"
 
 _ORDER = (" ORDER BY CASE origin WHEN 'feed' THEN 0 WHEN 'collection' THEN 1 ELSE 2 END,"
@@ -67,12 +66,7 @@ def cmd_batches(a):
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     topics = pipeline.active_topics()
-    brief = (ai.ITEM_RULES
-             + f"\n今天是 {time.strftime('%Y-%m-%d %A')}。活动类内容只写还没过去的场次，并写清日期。\n"
-             + "\n## 读者的话题\n"
-             + "\n".join(f"- id={t['id']}：{t['theme']} / {t['name']}：{t['description']}" for t in topics)
-             + "\n\n## 读者收藏或点过喜欢的内容（代表他的口味）\n"
-             + "\n".join(f"- {t}" for t in pipeline.taste_examples())
+    brief = (ai.brief(topics, pipeline.taste_examples())
              + "\n\n## 输出\n对 batch 文件里的每一篇写一个 JSON 对象，全部放进一个 JSON 数组，写到对应的 result 文件。"
                "每个对象的字段：id（原样抄 batch 里的 id）、keep、score、topic_id、evergreen、reason、cards"
                "（cards 是数组，每张有 title、points、takeaway）。points 必须是字符串数组，每句一个元素，"
@@ -82,7 +76,7 @@ def cmd_batches(a):
     items = _queued(a.limit, a.origin)
     files = []
     for n in range(0, len(items), a.size):
-        chunk = [{"id": r["id"], "origin": r["origin"], "title": r["title"], "text": r["text"][:TEXT_LIMIT]}
+        chunk = [{"id": r["id"], "origin": r["origin"], "title": r["title"], "text": r["text"][:pipeline.TEXT_LIMIT]}
                  for r in items[n:n + a.size]]
         f = out / f"batch-{n // a.size + 1:02d}.json"
         f.write_text(json.dumps(chunk, ensure_ascii=False, indent=1))
@@ -107,7 +101,7 @@ def cmd_import(a):
 
 def _pending_topics() -> list[dict]:
     return db.rows("SELECT t.id, t.name, t.description, th.name AS theme FROM topics t JOIN themes th ON th.id=t.theme_id"
-                   " WHERE t.keywords='[]' OR th.name=?", (PENDING_THEME,))
+                   " WHERE t.kind='news' AND (t.keywords='[]' OR th.name=?)", (PENDING_THEME,))
 
 
 def cmd_topics(_):
@@ -134,9 +128,15 @@ def cmd_add_topic(a):
         th = c.execute("SELECT id FROM themes WHERE name=?", (a.theme,)).fetchone()
         theme_id = th["id"] if th else c.execute("INSERT INTO themes(name, created) VALUES(?,?)",
                                                  (a.theme, db.now())).lastrowid
-        tid = c.execute("INSERT INTO topics(theme_id, name, description, keywords, created) VALUES(?,?,?,?,?)",
-                        (theme_id, a.name, a.description, a.keywords, db.now())).lastrowid
+        tid = c.execute("INSERT INTO topics(theme_id, name, description, keywords, kind, created) VALUES(?,?,?,?,?,?)",
+                        (theme_id, a.name, a.description, a.keywords, a.kind, db.now())).lastrowid
     print(db.one("SELECT * FROM topics WHERE id=?", (tid,)))
+
+
+def cmd_set_kind(a):
+    with db.tx() as c:
+        c.execute("UPDATE topics SET kind=? WHERE id=?", (a.kind, a.id))
+    print(db.one("SELECT id, name, kind FROM topics WHERE id=?", (a.id,)))
 
 
 def cmd_cards(a):
@@ -222,7 +222,10 @@ def main() -> None:
     s = sub.add_parser("add-url"); s.add_argument("--topic", type=int, required=True); s.add_argument("urls", nargs="+")
     s.set_defaults(fn=cmd_add_url)
     s = sub.add_parser("add-topic"); s.add_argument("--theme", required=True); s.add_argument("--name", required=True)
-    s.add_argument("--description", required=True); s.add_argument("--keywords", default="[]"); s.set_defaults(fn=cmd_add_topic)
+    s.add_argument("--description", required=True); s.add_argument("--keywords", default="[]")
+    s.add_argument("--kind", choices=["news", "series"], default="news"); s.set_defaults(fn=cmd_add_topic)
+    s = sub.add_parser("set-kind"); s.add_argument("id", type=int); s.add_argument("kind", choices=["news", "series"])
+    s.set_defaults(fn=cmd_set_kind)
     s = sub.add_parser("cards"); s.add_argument("--topic", type=int, required=True); s.add_argument("files", nargs="+")
     s.set_defaults(fn=cmd_cards)
     sub.add_parser("sources").set_defaults(fn=cmd_sources)

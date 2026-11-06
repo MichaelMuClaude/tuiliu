@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS topics (
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     keywords TEXT DEFAULT '[]',      -- JSON list, used to search sources
+    kind TEXT DEFAULT 'news',        -- news: fed by sources, time-sensitive | series: one-off set of written cards
     weight REAL DEFAULT 1.0,
     paused INTEGER DEFAULT 0,
     created REAL
@@ -115,6 +116,13 @@ def init() -> None:
             c.execute("ALTER TABLE items ADD COLUMN topic_hint INTEGER")
         if "image" not in {r["name"] for r in c.execute("PRAGMA table_info(cards)")}:  # added 2026-11-04
             c.execute("ALTER TABLE cards ADD COLUMN image TEXT DEFAULT ''")
+        if "kind" not in {r["name"] for r in c.execute("PRAGMA table_info(topics)")}:  # added 2026-11-06
+            c.execute("ALTER TABLE topics ADD COLUMN kind TEXT DEFAULT 'news'")
+            # Topics whose cards were all written in a session, with no feed of their own, are series.
+            c.execute("UPDATE topics SET kind='series' WHERE id NOT IN (SELECT topic_id FROM sources WHERE topic_id IS NOT NULL)"
+                      " AND (SELECT COUNT(*) FROM cards k WHERE k.topic_id=topics.id AND k.item_id IS NULL)"
+                      " > 10 * (SELECT COUNT(*) FROM cards k WHERE k.topic_id=topics.id AND k.item_id IS NOT NULL)"
+                      " AND (SELECT COUNT(*) FROM cards k WHERE k.topic_id=topics.id AND k.evergreen=1) > 0")
 
 
 def rows(sql: str, args=()) -> list[dict]:

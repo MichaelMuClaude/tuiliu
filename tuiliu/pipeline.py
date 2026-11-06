@@ -19,6 +19,8 @@ from .config import PIPELINE_INTERVAL_MIN, RAW_TEXT_KEEP_DAYS, has_api_key
 log = logging.getLogger("tuiliu.pipeline")
 _run_lock = threading.Lock()
 WORKERS = 6
+AI_WORKERS = 3     # few, so each card sees the ones written just before it (duplicate check)
+TEXT_LIMIT = 5000  # characters of an article sent to the model, same as the session batches
 MAX_PER_RUN = 200
 STALE_NEWS_DAYS = 10
 
@@ -93,8 +95,15 @@ def fill_text(ids: list[int] | None = None) -> None:
 
 
 def active_topics() -> list[dict]:
+    """News topics that articles can be filed under. Series topics get no articles: their cards are written once."""
     return db.rows("SELECT t.id, t.name, t.description, th.name AS theme FROM topics t JOIN themes th ON th.id=t.theme_id"
-                   " WHERE t.paused=0 AND th.paused=0")
+                   " WHERE t.paused=0 AND th.paused=0 AND t.kind='news'")
+
+
+def recent_card_titles(days: int = 3) -> list[str]:
+    """Titles of cards written lately, so the same story is not carded twice."""
+    return [r["title"] for r in db.rows("SELECT title FROM cards WHERE item_id IS NOT NULL AND created>?"
+                                        " ORDER BY created DESC LIMIT 300", (db.now() - days * 86400,))]
 
 
 def taste_examples() -> list[str]:
@@ -145,16 +154,18 @@ def apply_result(item_id: int, res: dict | None, valid_topics: set[int]) -> str:
         return "carded"
 
 
-def _process_one(item: dict, topics: list[dict], taste: list[str]) -> None:
+def _process_one(item: dict, system: str, valid: set[int]) -> None:
     try:
-        res = ai.judge_and_write(item["title"], item["text"], topics, taste, item["origin"] == "collection")
+        # Read the recent titles per item, so a story carded a moment ago by another worker counts too.
+        res = ai.judge_and_write(item["title"], item["text"][:TEXT_LIMIT], system, recent_card_titles(),
+                                 item["origin"] == "collection")
     except Exception as e:
         log.warning("AI failed for %s: %s", item["title"][:40], e)
         with db.tx() as c:
             c.execute("UPDATE items SET attempts=attempts+1,"
                       " status=CASE WHEN attempts>=2 THEN 'failed' ELSE status END WHERE id=?", (item["id"],))
         return
-    apply_result(item["id"], res, {t["id"] for t in topics})
+    apply_result(item["id"], res, valid)
 
 
 def process(ids: list[int] | None = None, limit: int = MAX_PER_RUN) -> int:
@@ -169,11 +180,12 @@ def process(ids: list[int] | None = None, limit: int = MAX_PER_RUN) -> int:
     else:
         marks = ",".join("?" * len(ids)) or "NULL"
         todo = db.rows(f"SELECT id, title, text, origin FROM items WHERE status='ready' AND id IN ({marks})", ids)
-    topics, taste = active_topics(), taste_examples()
+    topics = active_topics()
     if not topics:
         return 0
-    with ThreadPoolExecutor(WORKERS) as pool:
-        list(pool.map(lambda it: _process_one(it, topics, taste), todo))
+    system, valid = ai.brief(topics, taste_examples()), {t["id"] for t in topics}
+    with ThreadPoolExecutor(AI_WORKERS) as pool:
+        list(pool.map(lambda it: _process_one(it, system, valid), todo))
     return len(todo)
 
 
@@ -191,7 +203,7 @@ def backfill_topic(topic_id: int, github: bool = True) -> int:
     """Search HN and GitHub for one topic's keywords, so a new topic gets cards within minutes.
     github=False for topics that are not about software (a company, local news)."""
     t = db.one("SELECT * FROM topics WHERE id=?", (topic_id,))
-    if not t:
+    if not t or t["kind"] != "news":
         return 0
     found = []
     for kw in json.loads(t["keywords"] or "[]")[:6]:

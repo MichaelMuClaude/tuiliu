@@ -1,6 +1,6 @@
 # 更新推流 — procedure for a Claude session
 
-There is no API key. The server only fetches and queues articles (every 45 minutes, no AI). Whenever the user says **"更新推流"** (or asks for new cards or topics), a Claude Code session does the AI part with the steps below. All commands run in `~/github/tuiliu` with `.venv/bin/python -m tuiliu.work ...`.
+Since 2026-11-06 the server has an API key and writes the cards for queued articles itself every 45 minutes (Haiku 5.5, see README). A session is still needed for what the server cannot do: setting up new topics and their feeds, web searches for weekend events and holidays, the gallery pages (a real browser), series of cards, and checking the cards the server wrote (duplicates, misfiled topics). When the user says **"更新推流"**, do steps 1, 2 and 5 (spot-check the newest cards); steps 3 and 4 are only needed if the queue is long, the key has expired (`work status` shows hundreds of `ready` items), or there is no key. All commands run in `~/github/tuiliu` with `.venv/bin/python -m tuiliu.work ...`.
 
 ## 1. Refresh the queue
 
@@ -21,6 +21,8 @@ cd ~/github/tuiliu && .venv/bin/python -m tuiliu.pipeline fetch
 - Topics no feed covers (weekend events, a home-repair question) get pages from a web search: `work add-url --topic ID URL ...` fetches each page and queues it under that topic. Topics that go stale need this on every update: for 珀斯周末活动 (id 10), search for what's on in Perth this coming weekend and queue 3-5 listing pages. The brief tells the subagents today's date, so they only write events that are still ahead.
 - 最近的节假日 (id 15) has no feed: write its cards yourself (`work cards`, with `"evergreen": false` on each card) from the official WA public holiday page (wa.gov.au, "Public holidays in Western Australia") plus checked dates for Chinese and global festivals. Top it up when the latest card's date is less than two months away.
 - 打折和薅羊毛 (id 16) reads OzBargain's front page and its WA tag; AI 数据中心 (id 18) reads Data Center Knowledge, DCD and ServeTheHome. ITEM_RULES has a deals rule, so deals are not rejected as ads.
+- 网络安全 (id 23) reads Krebs, BleepingComputer, ACSC alerts, the Microsoft Security Blog and The Hacker News; the same incident shows up in several of them, so reject the duplicates by title in step 3 and keep the most detailed one. The user is a security engineer: keep these cards technical.
+- 珀斯免费展览 (id 24): the gallery pages (artgallery.wa.gov.au, visit.museum.wa.gov.au, slwa.wa.gov.au) build their lists with JavaScript, so `add-url` gets almost nothing. Read them in the built-in browser and write the cards yourself (`work cards`, `"evergreen": false`, with end dates and prices). Refresh when exhibitions close.
 - Plain keywords sorted by stars bring up long-famous repos (TensorFlow, freeCodeCamp) and trackers of trending lists; screen those out in step 3.
 
 ## 3. Screen by title (cheap)
@@ -49,7 +51,7 @@ Spot-check three or four new cards (`sqlite3 data/tuiliu.db "select title, point
 
 ## Series written from scratch
 
-When the user asks for a series of cards on a subject rather than news (e.g. "100 张寒暄技巧"), there is no source article: `work add-topic --theme ... --name ... --description ... --keywords '[...]'`, write the cards yourself as JSON arrays of `{title, points, takeaway}` (same card rules as brief.md; outline the whole series first so the cards don't repeat), then `work cards --topic ID FILE.json ...`. Check any law or number before writing it into a card. A card may carry an `"image"` (a `/static/...` path); road sign pictures live in `static/signs/` with their Commons sources and licences in `static/signs/SOURCES.md`. Commons' API rejects Python's httpx (403), so fetch from it with curl, slowly (it rate-limits bursts). These cards are evergreen and are mixed into the feed with everything else.
+When the user asks for a series of cards on a subject rather than news (e.g. "100 张寒暄技巧"), there is no source article: `work add-topic --kind series --theme ... --name ... --description ... --keywords '[...]'` (series topics get no articles from feeds), write the cards yourself as JSON arrays of `{title, points, takeaway}` (same card rules as brief.md; outline the whole series first so the cards don't repeat), then `work cards --topic ID FILE.json ...`. Check any law or number before writing it into a card. A card may carry an `"image"` (a `/static/...` path); road sign pictures live in `static/signs/` with their Commons sources and licences in `static/signs/SOURCES.md`. Commons' API rejects Python's httpx (403), so fetch from it with curl, slowly (it rate-limits bursts). These cards are evergreen and are mixed into the feed with everything else.
 
 ## 6. Report
 
