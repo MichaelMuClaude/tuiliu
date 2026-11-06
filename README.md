@@ -39,5 +39,9 @@ cd ~/github/tuiliu && uv venv .venv && uv pip install --python .venv/bin/python 
 
 ## Where it runs
 
-1. **Prototype on CoreMint** in this folder: Python + SQLite + a full-screen scroll-snap web front end (PWA). Live since 2026-11-03: user service `~/.config/systemd/user/tuiliu.service` (127.0.0.1:8095), published with `tailscale serve --bg --https=8443 http://127.0.0.1:8095` at **the tailnet HTTPS address on port 8443** (tailnet only; turn off with `tailscale serve --https=8443 off`). Restart after code changes: `systemctl --user restart tuiliu`.
-2. **Then move to the Surface Pro 7** (`~/github/tuiliu/`, systemd user service on 127.0.0.1, published with `tailscale serve` on a new port). The Surface has no pCloud, so CoreMint must sync new Collection Markdown files to it (rsync).
+Since 2026-11-06 it runs on the **Surface Pro 7** (the private web server), in `~/github/tuiliu/` (a clone of this repo; data in `data/`, key in `~/.config/tuiliu/env`):
+
+- `~/.config/systemd/user/tuiliu.service` on 127.0.0.1:8095, enabled (linger is on, so it starts at boot), published with `tailscale serve --bg --https=10000 http://127.0.0.1:8095` (tailnet only). Update: `git pull && systemctl --user restart tuiliu`.
+- `ai-browser.service` (`~/github/ai-browser/`, copied from the archived ai-browser project) on 127.0.0.1:8888: a visible Chrome on the Chrome Remote Desktop display `:20`, used for Google News. Sign in to Google or solve a CAPTCHA there over Chrome Remote Desktop.
+- The Surface has no pCloud, so hand-picked Collection articles (`~/pCloudDrive/Collection`) are not read there yet; CoreMint would have to rsync them over.
+- From 2026-11-03 to 2026-11-06 it ran on CoreMint (service now disabled there).
