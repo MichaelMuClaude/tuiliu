@@ -1,6 +1,7 @@
 """Web server: the swipe page, the feed API, feedback and topic management. Runs the pipeline on a timer."""
 import json
 import logging
+import re
 import threading
 import time
 
@@ -9,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, chat, db, feed, pipeline, seed, work
+from . import chat, db, feed, pipeline, seed
 from .config import HOST, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -114,36 +115,27 @@ class NewTopic(BaseModel):
     description: str
 
 
+KEYWORD_THEME = "关键词"
+
+
 @app.post("/api/topics")
 def add_topic(body: NewTopic):
-    desc = body.description.strip()
-    if not desc:
-        raise HTTPException(400, "empty description")
-    if not has_api_key():
-        # No AI here: park it under the holding theme; the next "更新推流" session sets it up.
-        with db.tx() as c:
-            th = c.execute("SELECT id FROM themes WHERE name=?", (work.PENDING_THEME,)).fetchone()
-            theme_id = th["id"] if th else c.execute("INSERT INTO themes(name, description, created) VALUES(?,?,?)",
-                                                     (work.PENDING_THEME, "等下次更新推流时整理", db.now())).lastrowid
-            topic_id = c.execute("INSERT INTO topics(theme_id, name, description, created) VALUES(?,?,?,?)",
-                                 (theme_id, desc[:14], desc, db.now())).lastrowid
-        return {**db.one("SELECT * FROM topics WHERE id=?", (topic_id,)),
-                "message": "已记下，下次更新推流时会整理这个话题并找内容"}
-    themes = db.rows("SELECT id, name FROM themes")
-    spec = ai.expand_topic(desc, [t["name"] for t in themes])
-    if not spec:
-        raise HTTPException(502, "AI 没能理解这个话题，换个说法试试")
-    theme = next((t for t in themes if t["name"] == spec["theme"].strip()), None)
+    """The reader types search keywords (several separated by commas); they become a news topic whose keywords are
+    searched in the news straight away and every few hours after. No AI step: the words are used as typed."""
+    keywords = [k.strip() for k in re.split(r"[,，、;；\n]+", body.description) if k.strip()]
+    if not keywords:
+        raise HTTPException(400, "empty keywords")
     with db.tx() as c:
-        theme_id = theme["id"] if theme else c.execute(
-            "INSERT INTO themes(name, created) VALUES(?,?)", (spec["theme"].strip(), db.now())).lastrowid
+        th = c.execute("SELECT id FROM themes WHERE name=?", (KEYWORD_THEME,)).fetchone()
+        theme_id = th["id"] if th else c.execute("INSERT INTO themes(name, created) VALUES(?,?)",
+                                                 (KEYWORD_THEME, db.now())).lastrowid
         topic_id = c.execute(
-            "INSERT INTO topics(theme_id, name, description, keywords, created) VALUES(?,?,?,?,?)",
-            (theme_id, spec["name"].strip(), spec["description"].strip(),
-             json.dumps(spec["keywords"], ensure_ascii=False), db.now())).lastrowid
-    _run_in_background(pipeline.backfill_topic, topic_id)
+            "INSERT INTO topics(theme_id, name, description, keywords, kind, created) VALUES(?,?,?,?,'news',?)",
+            (theme_id, keywords[0][:30], "关于「" + "、".join(keywords) + "」的最新新闻",
+             json.dumps(keywords, ensure_ascii=False), db.now())).lastrowid
+    _run_in_background(pipeline.backfill_topic, topic_id, False)
     return {**db.one("SELECT * FROM topics WHERE id=?", (topic_id,)),
-            "message": f"已添加「{spec['name'].strip()}」，几分钟内就能刷到"}
+            "message": f"已添加，正在搜索「{'、'.join(keywords)}」的最新新闻"}
 
 
 class Patch(BaseModel):

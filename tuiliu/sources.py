@@ -4,7 +4,7 @@ import html
 import re
 import time
 from pathlib import Path
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 import feedparser
 import httpx
@@ -14,6 +14,7 @@ import yaml
 from .config import COLLECTION_DIR, USER_AGENT
 
 MAX_TEXT = 15000
+BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 _http = httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True)
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -80,6 +81,23 @@ def search_hn(query: str, days: int = 180, min_points: int = 30) -> list[dict]:
     since = int(time.time()) - days * 86400
     return _hn_hits("search", f"query={quote_plus(query)}&tags=story&hitsPerPage=15"
                               f"&numericFilters=points>{min_points},created_at_i>{since}")
+
+
+def search_news(query: str) -> list[dict]:
+    """Newest news articles for a keyword, from Bing News search (its RSS output, sorted by date). Free, no key."""
+    r = _http.get(f"https://www.bing.com/news/search?q={quote_plus(query)}&format=rss&qft=sortbydate%3d%221%22",
+                  headers={"User-Agent": BROWSER_UA})
+    r.raise_for_status()
+    out = []
+    for e in feedparser.parse(r.content).entries:
+        link = e.get("link", "")
+        # Bing wraps each link in a click-tracking redirect; the article address is its url parameter.
+        real = parse_qs(urlparse(link).query).get("url", [link])[0]
+        ts = e.get("published_parsed")
+        if real.startswith("http") and e.get("title"):
+            out.append({"url": real, "title": strip_html(e.title), "summary": strip_html(e.get("summary", "")),
+                        "published": calendar.timegm(ts) if ts else time.time()})
+    return out
 
 
 def search_github(query: str, days: int = 365, min_stars: int = 200) -> list[dict]:

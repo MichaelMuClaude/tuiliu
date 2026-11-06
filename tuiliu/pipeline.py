@@ -23,6 +23,8 @@ AI_WORKERS = 3     # few, so each card sees the ones written just before it (dup
 TEXT_LIMIT = 5000  # characters of an article sent to the model, same as the session batches
 MAX_PER_RUN = 200
 STALE_NEWS_DAYS = 10
+SEARCH_EVERY_HOURS = 3    # each news topic's keywords are searched in the news this often
+SEARCH_MAX_AGE_DAYS = 3   # older search results are not news any more
 
 
 def _insert_items(found: list[dict], source_id: int | None, origin: str, topic_hint: int | None = None) -> list[int]:
@@ -67,6 +69,29 @@ def fetch_sources(force: bool = False) -> int:
     return total
 
 
+def search_topics(force: bool = False) -> int:
+    """Search the news for every keyword of every news topic (Bing News, free). Feeds alone miss too much:
+    this is the main source of news. Each topic is searched every SEARCH_EVERY_HOURS; only recent articles count."""
+    total = 0
+    since = db.now() - SEARCH_MAX_AGE_DAYS * 86400
+    for t in active_topics():
+        key = f"searched_{t['id']}"
+        if not force and db.now() - (db.get_meta(key, 0) or 0) < SEARCH_EVERY_HOURS * 3600:
+            continue
+        found = []
+        for kw in json.loads(t["keywords"] or "[]")[:8]:
+            try:
+                found += [f for f in sources.search_news(kw) if f["published"] >= since]
+            except Exception as e:
+                log.warning("news search failed %s %s: %s", t["name"], kw, e)
+            time.sleep(1)   # be gentle with the search engine
+        db.set_meta(key, db.now())
+        n = len(_insert_items(found, None, "feed", t["id"]))
+        total += n
+        log.info("searched %-20s %3d found, %3d new", t["name"], len(found), n)
+    return total
+
+
 def _fill_one(item: dict) -> None:
     text = item["summary"] if len(item["summary"]) >= 1200 else ""
     if not text:
@@ -96,8 +121,8 @@ def fill_text(ids: list[int] | None = None) -> None:
 
 def active_topics() -> list[dict]:
     """News topics that articles can be filed under. Series topics get no articles: their cards are written once."""
-    return db.rows("SELECT t.id, t.name, t.description, th.name AS theme FROM topics t JOIN themes th ON th.id=t.theme_id"
-                   " WHERE t.paused=0 AND th.paused=0 AND t.kind='news'")
+    return db.rows("SELECT t.id, t.name, t.description, t.keywords, th.name AS theme FROM topics t"
+                   " JOIN themes th ON th.id=t.theme_id WHERE t.paused=0 AND th.paused=0 AND t.kind='news'")
 
 
 def recent_card_titles(days: int = 3) -> list[str]:
@@ -218,13 +243,19 @@ def prune() -> None:
 
 
 def backfill_topic(topic_id: int, github: bool = True) -> int:
-    """Search HN and GitHub for one topic's keywords, so a new topic gets cards within minutes.
+    """Search the news, HN and GitHub for one topic's keywords, so a new topic gets cards within minutes.
     github=False for topics that are not about software (a company, local news)."""
     t = db.one("SELECT * FROM topics WHERE id=?", (topic_id,))
     if not t or t["kind"] != "news":
         return 0
     found = []
-    for kw in json.loads(t["keywords"] or "[]")[:6]:
+    since = db.now() - SEARCH_MAX_AGE_DAYS * 86400
+    for kw in json.loads(t["keywords"] or "[]")[:8]:
+        try:
+            found += [f for f in sources.search_news(kw) if f["published"] >= since]
+        except Exception as e:
+            log.warning("backfill news search failed %s: %s", kw, e)
+        db.set_meta(f"searched_{topic_id}", db.now())
         if not kw.isascii():
             continue  # HN and GitHub search work best with English keywords
         for fn in (sources.search_hn, sources.search_github) if github else (sources.search_hn,):
@@ -245,6 +276,7 @@ def run_once(force: bool = False) -> bool:
     try:
         db.set_meta("pipeline_running", True)
         fetch_sources(force)
+        search_topics()
         fill_text()
         process()
         prune()

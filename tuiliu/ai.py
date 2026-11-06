@@ -1,4 +1,4 @@
-"""Claude calls: judge an item and write its cards, and turn a topic description into search keywords."""
+"""Claude calls: judge an article and write its cards."""
 import json
 import logging
 import time
@@ -40,18 +40,6 @@ ITEM_SCHEMA = {
         "cards": {"type": "array", "items": CARD_SCHEMA},
     },
     "required": ["keep", "score", "topic_id", "evergreen", "reason", "cards"],
-    "additionalProperties": False,
-}
-
-TOPIC_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "theme": {"type": "string"},
-        "name": {"type": "string"},
-        "description": {"type": "string"},
-        "keywords": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["theme", "name", "description", "keywords"],
     "additionalProperties": False,
 }
 
@@ -123,11 +111,3 @@ def judge_and_write(title: str, text: str, system: str, recent: list[str], hand_
     user = f"{seen}{note}## 这篇内容\n标题：{title}\n\n正文：\n{text}"
     return _call(system, user, ITEM_SCHEMA)
 
-
-def expand_topic(description: str, themes: list[str]) -> dict | None:
-    system = ("把读者用一句话描述的兴趣，整理成推流里的一个话题。"
-              "theme：从已有主题里选最合适的一个，原样返回它的名字；都不合适就新起一个简短的中文主题名。"
-              "name：话题名，简短中文，不超过 14 个字。description：一句话说明这个话题要推什么。"
-              "keywords：4-6 个用于在 Hacker News 和 GitHub 搜索的英文关键词或短语，再加 1-2 个中文关键词。"
-              "\n已有主题：" + "、".join(themes))
-    return _call(system, description, TOPIC_SCHEMA, max_tokens=1000)

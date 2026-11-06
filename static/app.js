@@ -399,8 +399,8 @@ async function renderTopics() {
       h("h3", {}, th.name),
       th.topics.map(t => {
         const pending = !t.keywords.length;
-        const kind = t.kind === "series" ? "专题" : "新闻";
-        const note = pending ? "等下次更新推流时整理" : `${kind} · ${t.description} · ${t.cards} 张卡片`;
+        const about = t.kind === "series" ? `专题 · ${t.description}` : `新闻 · 搜索：${t.keywords.join("、")}`;
+        const note = pending ? "等下次更新推流时整理" : `${about} · ${t.cards} 张卡片`;
         const del = h("button", { class: "del" }, "删除");
         del.addEventListener("click", async () => {
           if (!del.classList.contains("confirm")) {   // first tap arms, second tap deletes
