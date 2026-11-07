@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import chat, db, feed, pipeline, seed
+from . import chat, db, feed, pipeline, seed, weather
 from .config import HOST, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -36,6 +36,10 @@ def _scheduler() -> None:
                 pipeline.run_once()
             except Exception:
                 log.exception("pipeline run failed")
+        try:
+            weather.run_if_due()
+        except Exception:
+            log.exception("weather card failed")
         time.sleep(60)
 
 

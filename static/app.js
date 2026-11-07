@@ -394,8 +394,8 @@ sheet.addEventListener("touchend", e => {
 async function renderTopics() {
   const [{ themes }, st] = await Promise.all([api("/api/topics"), api("/api/status").catch(() => null)]);
   const list = document.getElementById("themeList");
-  // Only news topics are listed: they are the ones searched for again and again. Series stay in the feed.
-  for (const th of themes) th.topics = th.topics.filter(t => t.kind !== "series");
+  // Only news topics are listed: they are the ones searched for again and again. Series and the weather stay in the feed.
+  for (const th of themes) th.topics = th.topics.filter(t => t.kind === "news");
   list.replaceChildren(...themes.filter(th => th.topics.length).map(th =>
     h("div", { class: "theme" },
       h("h3", {}, th.name),

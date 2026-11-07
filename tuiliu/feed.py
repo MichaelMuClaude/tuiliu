@@ -6,7 +6,7 @@ import json
 import random
 from collections import defaultdict
 
-from . import db
+from . import db, weather
 
 RECENT_TOPICS = 6       # a topic among the last few cards seen waits until others have had a turn
 RECYCLE_AFTER_DAYS = 21  # evergreen cards may come back after this long
@@ -26,6 +26,7 @@ WHERE c.reaction >= 0
   AND c.topic_id IS NOT NULL          -- cards of a deleted topic stop showing (favourites keep them)
   AND COALESCE(t.paused, 0) = 0 AND COALESCE(th.paused, 0) = 0
 """
+_NOT_WEATHER = " AND COALESCE(t.kind, '') != 'weather'"   # the weather card comes first once, never at random
 
 
 def _value(card: dict, now: float) -> float:
@@ -39,10 +40,10 @@ def _value(card: dict, now: float) -> float:
 
 def next_cards(n: int, exclude: set[int]) -> list[dict]:
     now = db.now()
-    pool = [c for c in db.rows(_CARD_SQL + " AND c.shown_count = 0") if c["id"] not in exclude]
+    pool = [c for c in db.rows(_CARD_SQL + _NOT_WEATHER + " AND c.shown_count = 0") if c["id"] not in exclude]
     if len(pool) < n * 3:
         cutoff = now - RECYCLE_AFTER_DAYS * 86400
-        pool += [c for c in db.rows(_CARD_SQL + " AND c.shown_count > 0 AND c.evergreen = 1 AND c.last_shown < ?"
+        pool += [c for c in db.rows(_CARD_SQL + _NOT_WEATHER + " AND c.shown_count > 0 AND c.evergreen = 1 AND c.last_shown < ?"
                                     " ORDER BY c.last_shown LIMIT 200", (cutoff,)) if c["id"] not in exclude]
     for c in pool:
         c["value"] = _value(c, now) * (0.6 if c["shown_count"] else 1.0)
@@ -68,6 +69,11 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
     if review:
         picked.insert(random.randrange(1, len(picked) + 1) if picked else 0, review)
 
+    wid = weather.todays_card()   # today's weather, first, until it has been seen once
+    w = db.one(_CARD_SQL + " AND c.id = ? AND c.shown_count = 0", (wid,)) if wid and wid not in exclude else None
+    if w:
+        picked.insert(0, w)
+
     return [{
         "id": c["id"], "title": c["title"], "points": json.loads(c["points"]), "takeaway": c["takeaway"],
         "topic": c["topic"], "theme": c["theme"], "reaction": c["reaction"], "image": c["image"],
@@ -78,7 +84,7 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
 def _due_favorite(exclude: set[int], now: float) -> dict | None:
     """A favourite the reader has not seen for a while (spaced: 3, 6, 12... days), so favourites resurface in the feed
     instead of waiting in the favourites list."""
-    due = [c for c in db.rows(_CARD_SQL.replace("WHERE c.reaction >= 0", "WHERE c.reaction = 1"))
+    due = [c for c in db.rows(_CARD_SQL.replace("WHERE c.reaction >= 0", "WHERE c.reaction = 1") + _NOT_WEATHER)
            if c["id"] not in exclude and now - c["last_shown"] >
            min(REVIEW_MAX_GAP, REVIEW_FIRST_GAP * 2 ** max(0, c["shown_count"] - 1)) * 86400]
     return min(due, key=lambda c: c["last_shown"]) if due else None
