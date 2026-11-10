@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import chat, db, explore, feed, pipeline, seed, weather
+from . import chat, db, explore, feed, photos, pipeline, seed, weather
 from .config import HOST, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -40,6 +40,10 @@ def _scheduler() -> None:
             weather.run_if_due()
         except Exception:
             log.exception("weather card failed")
+        try:
+            photos.run_if_due()
+        except Exception:
+            log.exception("photo scan failed")
         time.sleep(60)
 
 
@@ -55,6 +59,14 @@ def startup() -> None:
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/liya/{name}")
+def liya_photo(name: str):
+    p = photos.path(name)
+    if not p:
+        raise HTTPException(404)
+    return FileResponse(p, headers={"Cache-Control": "max-age=86400"})
 
 
 @app.get("/manifest.webmanifest")
