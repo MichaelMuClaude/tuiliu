@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import chat, db, feed, pipeline, seed, weather
+from . import chat, db, explore, feed, pipeline, seed, weather
 from .config import HOST, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -86,6 +86,24 @@ def post_event(e: Event):
         raise HTTPException(400, "unknown event type")
     feed.record(e.card_id, e.type, e.dwell_ms)
     return {"ok": True}
+
+
+class Explore(BaseModel):
+    today: str = ""
+
+
+@app.post("/api/cards/{card_id}/explore")
+def post_explore(card_id: int, body: Explore):
+    """📌: put the card on 探索清单, dated for when it should come up. A second tap returns the card already made."""
+    if not has_api_key():
+        raise HTTPException(503, "没有 API key，加不了")
+    try:
+        return explore.add(card_id, body.today)
+    except LookupError:
+        raise HTTPException(404, "找不到这张卡")
+    except Exception as e:
+        log.exception("explore failed")
+        raise HTTPException(502, f"没加上：{e}")
 
 
 @app.get("/api/favorites")

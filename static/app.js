@@ -97,6 +97,30 @@ function copyButton(c) {
   return b;
 }
 
+// 📌: put the card on 探索清单. The server writes the line and picks the day it comes up; it can take a few seconds.
+async function exploreCard(c, b) {
+  if (b.disabled) return;
+  b.disabled = true;
+  b.textContent = "加入中…";
+  try {
+    const d = new Date(), today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const r = await api(`/api/cards/${c.id}/explore`, { method: "POST", body: JSON.stringify({ today }) });
+    const when = r.due ? `，${+r.due.slice(5, 7)}月${+r.due.slice(8)}日出现` : "";
+    toast(r.already ? `这张已经在探索清单里了${when}` : `已加入探索清单${when}`);
+    b.textContent = "📌 已加入";
+  } catch (e) {
+    toast(e.message);
+    b.textContent = "📌 加入探索清单";
+    b.disabled = false;
+  }
+}
+
+function exploreButton(c) {
+  const b = h("button", { class: "copy explore", type: "button" }, "📌 加入探索清单");
+  b.addEventListener("click", () => exploreCard(c, b));   // mouse; taps are handled in touchend
+  return b;
+}
+
 function cardSlide(c) {
   const label = [c.review ? "❤ 收藏回顾" : "", c.theme, c.topic].filter(Boolean).join(" · ");
   return h("section", { class: "slide" },
@@ -107,7 +131,7 @@ function cardSlide(c) {
       h("h1", {}, c.title),
       h("ul", { class: "points" }, c.points.map(p => h("li", {}, p))),
       c.takeaway ? h("p", { class: "takeaway" }, "💡 ", c.takeaway) : null,
-      h("div", { class: "card-foot" }, copyButton(c))));
+      h("div", { class: "card-foot" }, exploreButton(c), copyButton(c))));
 }
 
 function noticeSlide(title, text, spinning) {
@@ -275,6 +299,12 @@ stage.addEventListener("touchend", e => {
   lastTouchEnd = now;
   if (moved < 12 && now - t0 < 300) {             // a quick tap; two in a row is a double tap
     e.preventDefault();                           // no emulated mouse clicks / dblclick afterwards
+    const explore = e.target.closest && e.target.closest(".explore");
+    if (explore && current && !current.notice) {
+      exploreCard(current.card, explore);
+      lastTap = null;
+      return;
+    }
     if (e.target.closest && e.target.closest(".copy") && current && !current.notice) {
       copyCard(current.card);
       lastTap = null;
@@ -460,7 +490,7 @@ async function renderFavorites() {
       h("h4", {}, c.title),
       h("ul", {}, c.points.map(p => h("li", {}, p))),
       c.takeaway ? h("p", { class: "take" }, "💡 ", c.takeaway) : null,
-      h("div", { class: "fav-foot" }, copyButton(c), remove));
+      h("div", { class: "fav-foot" }, exploreButton(c), copyButton(c), remove));
     remove.addEventListener("click", async () => {
       await postEvent(c.id, "clear");
       if (current && current.card && current.card.id === c.id) {
