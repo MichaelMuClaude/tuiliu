@@ -121,15 +121,7 @@ function exploreButton(c) {
   return b;
 }
 
-function photoSlide(c) {
-  return h("section", { class: "slide" },
-    h("article", { class: "card photo-card" + (c.reaction === 1 ? " faved" : "") },
-      heart("fav-mark"),
-      h("img", { class: "photo", src: c.image, alt: "" })));
-}
-
 function cardSlide(c) {
-  if (c.photo) return photoSlide(c);
   const label = [c.review ? "❤ 收藏回顾" : "", c.theme, c.topic].filter(Boolean).join(" · ");
   return h("section", { class: "slide" },
     h("article", { class: "card" + (c.reaction === 1 ? " faved" : "") },

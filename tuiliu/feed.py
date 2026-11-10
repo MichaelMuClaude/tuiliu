@@ -18,7 +18,7 @@ REVIEW_MAX_GAP = 60
 _CARD_SQL = """
 SELECT c.id, c.title, c.points, c.takeaway, c.score, c.evergreen, c.created, c.topic_id,
        c.shown_count, c.last_shown, c.reaction, c.image,
-       COALESCE(t.name, '') AS topic, COALESCE(t.kind, '') AS kind, COALESCE(th.name, '') AS theme, th.id AS theme_id
+       COALESCE(t.name, '') AS topic, COALESCE(th.name, '') AS theme, th.id AS theme_id
 FROM cards c
 LEFT JOIN topics t ON t.id = c.topic_id
 LEFT JOIN themes th ON th.id = t.theme_id
@@ -77,7 +77,7 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
     return [{
         "id": c["id"], "title": c["title"], "points": json.loads(c["points"]), "takeaway": c["takeaway"],
         "topic": c["topic"], "theme": c["theme"], "reaction": c["reaction"], "image": c["image"],
-        "photo": c["kind"] == "photo", "review": c is review,
+        "review": c is review,
     } for c in picked]
 
 
