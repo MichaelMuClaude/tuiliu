@@ -135,7 +135,7 @@ function wordSlide(c) {
   unknown.addEventListener("click", () => lookUpWord(c));   // mouse; taps are handled in touchend
   return h("section", { class: "slide" },
     h("article", { class: "card word-card" },
-      h("div", { class: "word-head" }, h("span", { class: "chip" }, "词卡"), unknown),
+      h("div", { class: "word-head" }, unknown, h("span", { class: "chip" }, "词卡")),   // 不认识 top left, as in GlanceCards
       h("img", { class: "card-img word", src: c.image, alt: c.title })));
 }
 
