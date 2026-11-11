@@ -1,6 +1,7 @@
 """Choose the next cards to show and record what was seen. No AI calls here, so swiping stays instant.
 
 Topics come up at random, all equally often (the user's wish, 2026-11-06: no learned topic weights).
+The one exception, also the user's choice (2026-11-11): 莉娅's cards of the day come up about one card in eight.
 """
 import json
 import random
@@ -14,11 +15,12 @@ WEIGHT_MIN, WEIGHT_MAX = 0.2, 3.0   # only for the topics API; the feed no longe
 REVIEW_SHARE = 0.08      # about one card in twelve is a favourite coming back for another look
 REVIEW_FIRST_GAP = 3     # days before a favourite first comes back; the gap doubles each time it is shown
 REVIEW_MAX_GAP = 60
+LIYA_EVERY = 8           # 莉娅's cards for today: about one in this many cards (user, 2026-11-11)
 
 _CARD_SQL = """
 SELECT c.id, c.title, c.points, c.takeaway, c.score, c.evergreen, c.created, c.topic_id,
        c.shown_count, c.last_shown, c.reaction, c.image,
-       COALESCE(t.name, '') AS topic, COALESCE(th.name, '') AS theme, th.id AS theme_id
+       COALESCE(t.name, '') AS topic, COALESCE(t.kind, '') AS kind, COALESCE(th.name, '') AS theme, th.id AS theme_id
 FROM cards c
 LEFT JOIN topics t ON t.id = c.topic_id
 LEFT JOIN themes th ON th.id = t.theme_id
@@ -26,7 +28,11 @@ WHERE c.reaction >= 0
   AND c.topic_id IS NOT NULL          -- cards of a deleted topic stop showing (favourites keep them)
   AND COALESCE(t.paused, 0) = 0 AND COALESCE(th.paused, 0) = 0
 """
-_NOT_WEATHER = " AND COALESCE(t.kind, '') != 'weather'"   # the weather card comes first once, never at random
+# The weather card comes first once and 莉娅's cards have their own place; neither is picked at random.
+_NOT_SPECIAL = " AND COALESCE(t.kind, '') NOT IN ('weather', 'liya')"
+# 莉娅's cards (topic kind 'liya'): a picture of her in the day's outfit and what she wants to say; only on their day.
+_LIYA_TODAY = (" AND t.kind = 'liya' AND c.shown_count = 0"
+               " AND date(c.created, 'unixepoch', 'localtime') = date('now', 'localtime') ORDER BY c.created")
 
 
 def _value(card: dict, now: float) -> float:
@@ -40,10 +46,10 @@ def _value(card: dict, now: float) -> float:
 
 def next_cards(n: int, exclude: set[int]) -> list[dict]:
     now = db.now()
-    pool = [c for c in db.rows(_CARD_SQL + _NOT_WEATHER + " AND c.shown_count = 0") if c["id"] not in exclude]
+    pool = [c for c in db.rows(_CARD_SQL + _NOT_SPECIAL + " AND c.shown_count = 0") if c["id"] not in exclude]
     if len(pool) < n * 3:
         cutoff = now - RECYCLE_AFTER_DAYS * 86400
-        pool += [c for c in db.rows(_CARD_SQL + _NOT_WEATHER + " AND c.shown_count > 0 AND c.evergreen = 1 AND c.last_shown < ?"
+        pool += [c for c in db.rows(_CARD_SQL + _NOT_SPECIAL + " AND c.shown_count > 0 AND c.evergreen = 1 AND c.last_shown < ?"
                                     " ORDER BY c.last_shown LIMIT 200", (cutoff,)) if c["id"] not in exclude]
     for c in pool:
         c["value"] = _value(c, now) * (0.6 if c["shown_count"] else 1.0)
@@ -69,6 +75,11 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
     if review:
         picked.insert(random.randrange(1, len(picked) + 1) if picked else 0, review)
 
+    if random.random() < n / LIYA_EVERY:
+        liya = [c for c in db.rows(_CARD_SQL + _LIYA_TODAY) if c["id"] not in exclude]
+        if liya:
+            picked.insert(random.randrange(1, len(picked) + 1) if picked else 0, liya[0])
+
     wid = weather.todays_card()   # today's weather, first, until it has been seen once
     w = db.one(_CARD_SQL + " AND c.id = ? AND c.shown_count = 0", (wid,)) if wid and wid not in exclude else None
     if w:
@@ -77,14 +88,14 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
     return [{
         "id": c["id"], "title": c["title"], "points": json.loads(c["points"]), "takeaway": c["takeaway"],
         "topic": c["topic"], "theme": c["theme"], "reaction": c["reaction"], "image": c["image"],
-        "review": c is review,
+        "liya": c["kind"] == "liya", "review": c is review,
     } for c in picked]
 
 
 def _due_favorite(exclude: set[int], now: float) -> dict | None:
     """A favourite the reader has not seen for a while (spaced: 3, 6, 12... days), so favourites resurface in the feed
     instead of waiting in the favourites list."""
-    due = [c for c in db.rows(_CARD_SQL.replace("WHERE c.reaction >= 0", "WHERE c.reaction = 1") + _NOT_WEATHER)
+    due = [c for c in db.rows(_CARD_SQL.replace("WHERE c.reaction >= 0", "WHERE c.reaction = 1") + _NOT_SPECIAL)
            if c["id"] not in exclude and now - c["last_shown"] >
            min(REVIEW_MAX_GAP, REVIEW_FIRST_GAP * 2 ** max(0, c["shown_count"] - 1)) * 86400]
     return min(due, key=lambda c: c["last_shown"]) if due else None

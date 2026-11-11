@@ -10,7 +10,7 @@
     python -m tuiliu.work set-topic ID --theme NAME --name NAME --description TEXT --keywords JSON
     python -m tuiliu.work backfill ID                       # search HN/GitHub for a topic (no AI)
     python -m tuiliu.work add-url --topic ID URL [URL ...]  # queue pages found by web search
-    python -m tuiliu.work add-topic --theme NAME --name NAME --description TEXT [--keywords JSON] [--kind series]
+    python -m tuiliu.work add-topic --theme NAME --name NAME --description TEXT [--keywords JSON] [--kind series|liya]
     python -m tuiliu.work set-kind ID news|series                # news: fed by sources; series: written once
     python -m tuiliu.work cards --topic ID FILE.json [...]  # cards the session wrote itself, no source article
     python -m tuiliu.work sources                           # list feeds
@@ -211,7 +211,7 @@ def main() -> None:
     s.set_defaults(fn=cmd_add_url)
     s = sub.add_parser("add-topic"); s.add_argument("--theme", required=True); s.add_argument("--name", required=True)
     s.add_argument("--description", required=True); s.add_argument("--keywords", default="[]")
-    s.add_argument("--kind", choices=["news", "series"], default="news"); s.set_defaults(fn=cmd_add_topic)
+    s.add_argument("--kind", choices=["news", "series", "liya"], default="news"); s.set_defaults(fn=cmd_add_topic)
     s = sub.add_parser("set-kind"); s.add_argument("id", type=int); s.add_argument("kind", choices=["news", "series"])
     s.set_defaults(fn=cmd_set_kind)
     s = sub.add_parser("cards"); s.add_argument("--topic", type=int, required=True); s.add_argument("files", nargs="+")

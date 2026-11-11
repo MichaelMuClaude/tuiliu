@@ -127,7 +127,7 @@ function cardSlide(c) {
     h("article", { class: "card" + (c.reaction === 1 ? " faved" : "") },
       heart("fav-mark"),
       label ? h("span", { class: "chip" }, label) : null,
-      c.image ? h("img", { class: "card-img", src: c.image, alt: "" }) : null,
+      c.image ? h("img", { class: "card-img" + (c.liya ? " liya" : ""), src: c.image, alt: "" }) : null,
       h("h1", {}, c.title),
       h("ul", { class: "points" }, c.points.map(p => h("li", {}, p))),
       c.takeaway ? h("p", { class: "takeaway" }, "💡 ", c.takeaway) : null,

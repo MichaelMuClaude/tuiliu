@@ -7,6 +7,7 @@ DATA_DIR = Path(os.environ.get("TUILIU_DATA", ROOT / "data"))
 DB_PATH = DATA_DIR / "tuiliu.db"
 STATIC_DIR = ROOT / "static"
 CONFIG_DIR = Path.home() / ".config" / "tuiliu"
+LIYA_CARD_DIR = Path(os.environ.get("TUILIU_LIYA", Path.home() / "Pictures" / "Liya" / "推流卡片"))  # 莉娅's card pictures
 COLLECTION_DIR = Path(os.environ.get("TUILIU_COLLECTION", Path.home() / "pCloudDrive" / "Collection"))
 
 MODEL = "claude-haiku-5-5"          # judges articles and writes their cards

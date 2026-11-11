@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import chat, db, explore, feed, pipeline, seed, weather
-from .config import HOST, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
+from .config import HOST, LIYA_CARD_DIR, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
 app = FastAPI(title="推流")
@@ -55,6 +55,15 @@ def startup() -> None:
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/liya/{name}")
+def liya_picture(name: str):
+    """A picture for 莉娅's cards, from her folder (never in the repo, which is public)."""
+    p = LIYA_CARD_DIR / name
+    if "/" in name or p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp") or not p.is_file():
+        raise HTTPException(404)
+    return FileResponse(p, headers={"Cache-Control": "max-age=86400"})
 
 
 @app.get("/manifest.webmanifest")
