@@ -1,5 +1,8 @@
 """Choose the next cards to show and record what was seen. No AI calls here, so swiping stays instant.
 
+One rule for every card (the user, 2026-11-11): swipe up = next, and the card stays in the pool and can come round
+again; swipe left or right = gone for good (reaction -1); double tap = favourite, and it comes round more often.
+
 Topics come up at random, all equally often (the user's wish, 2026-11-06: no learned topic weights).
 The one exception, also the user's choice (2026-11-11): 莉娅's cards of the day come up about one card in eight.
 English word cards from GlanceCards (words.py) are mixed in at about one card in five, and 探索清单 ideas (ideas.py)
@@ -12,7 +15,9 @@ from collections import defaultdict
 from . import db, dishes, frame, ideas, weather, words
 
 RECENT_TOPICS = 6       # a topic among the last few cards seen waits until others have had a turn
-RECYCLE_AFTER_DAYS = 21  # evergreen cards may come back after this long
+SEEN_SHARE = 1 / 8      # about one card in eight is one already seen, coming round again (user, 2026-11-11: swiping
+SEEN_REST_DAYS = 3       # up keeps a card in the pool, only left/right removes it); it rests this long first
+SEEN_FAV_WEIGHT = 3      # a favourite comes round again this many times as often
 WEIGHT_MIN, WEIGHT_MAX = 0.2, 3.0   # only for the topics API; the feed no longer uses weights
 REVIEW_SHARE = 0.08      # about one card in twelve is a favourite coming back for another look
 REVIEW_FIRST_GAP = 3     # days before a favourite first comes back; the gap doubles each time it is shown
@@ -49,10 +54,10 @@ def _value(card: dict, now: float) -> float:
 def next_cards(n: int, exclude: set[int]) -> list[dict]:
     now = db.now()
     pool = [c for c in db.rows(_CARD_SQL + _NOT_SPECIAL + " AND c.shown_count = 0") if c["id"] not in exclude]
-    if len(pool) < n * 3:
-        cutoff = now - RECYCLE_AFTER_DAYS * 86400
-        pool += [c for c in db.rows(_CARD_SQL + _NOT_SPECIAL + " AND c.shown_count > 0 AND c.evergreen = 1 AND c.last_shown < ?"
-                                    " ORDER BY c.last_shown LIMIT 200", (cutoff,)) if c["id"] not in exclude]
+    rested = [c for c in db.rows(_CARD_SQL + _NOT_SPECIAL + " AND c.shown_count > 0 AND c.last_shown < ?",
+                                 (now - SEEN_REST_DAYS * 86400,)) if c["id"] not in exclude]
+    if len(pool) < n * 3:   # running out of new cards: the seen ones fill in
+        pool += rested
     for c in pool:
         c["value"] = _value(c, now) * (0.6 if c["shown_count"] else 1.0)
     # Pick a topic at random (each topic equally likely, skipping those among the last few cards seen), then that
@@ -76,6 +81,13 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
     review = _due_favorite(exclude | {c["id"] for c in picked}, now) if random.random() < n * REVIEW_SHARE else None
     if review:
         picked.insert(random.randrange(1, len(picked) + 1) if picked else 0, review)
+
+    # Cards seen before come round again now and then, favourites more often; only a sideways swipe removes one.
+    taken = {c["id"] for c in picked}
+    again = [c for c in rested if c["id"] not in taken]
+    again.sort(key=lambda c: random.random() ** (1 / (SEEN_FAV_WEIGHT if c["reaction"] == 1 else 1)), reverse=True)
+    for c in again[:int(n * SEEN_SHARE) + (random.random() < n * SEEN_SHARE % 1)]:
+        picked.insert(random.randrange(1, len(picked) + 1) if picked else 0, c)
 
     if random.random() < n / LIYA_EVERY:
         liya = [c for c in db.rows(_CARD_SQL + _LIYA_TODAY) if c["id"] not in exclude]

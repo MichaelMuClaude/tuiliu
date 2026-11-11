@@ -217,15 +217,19 @@ async function undo(path, body, done) {
   }
 }
 
-// A dish from 御膳房: photo, name, how to make it and what goes in; double tap = 就吃这个.
+// A dish from 御膳房: photo, name, how to make it and what goes in; double tap = favourite, 就吃这个 = log the meal.
 function dishSlide(c) {
+  const eat = h("button", { class: "copy eat", type: "button" }, "就吃这个");
+  eat.addEventListener("click", () => eatDish(c));   // mouse; taps are handled in touchend
   return h("section", { class: "slide" },
-    h("article", { class: "card dish-card" },
+    h("article", { class: "card dish-card" + (c.reaction === 1 ? " faved" : "") },
+      heart("fav-mark"),
       h("span", { class: "chip" }, ["御膳房", ...c.chips].join(" · ")),
       c.image ? h("img", { class: "card-img dish", src: c.image, alt: "" }) : null,
       h("h1", {}, c.title),
       h("ul", { class: "points" }, c.points.map(p => h("li", {}, p))),
-      h("p", { class: "dish-eaten" }, c.eaten, " · 双击 = 就吃这个"),
+      h("p", { class: "dish-eaten" }, c.eaten),
+      h("div", { class: "card-foot" }, eat),
       h("div", { class: "stamp" }, "就它了")));
 }
 
@@ -310,25 +314,35 @@ function postEvent(card_id, type) {
 
 // Double tap: favourite the card on screen; a second double tap takes it back.
 function toggleFavorite(x, y) {
-  if (!current || current.notice || current.card.word) return;
+  if (!current || current.notice) return;
   const c = current.card;
   if (c.photo) return likePhoto(c, x, y);
-  if (c.dish) return eatDish(c);
+  if (c.word) {   // a word's favourite is 不认识: it comes round more often
+    if (c.studying) { toast("已经在不认识里了"); return; }
+    const burst = heart("burst");
+    burst.style.left = `${x}px`;
+    burst.style.top = `${y}px`;
+    document.body.append(burst);
+    setTimeout(() => burst.remove(), 800);
+    return studyWord(c, current.el.querySelector(".unknown"));
+  }
   const on = c.reaction !== 1;
   c.reaction = on ? 1 : 0;
   current.el.querySelector(".card").classList.toggle("faved", on);
   if (c.idea) {   // hearted in 探索清单 itself, where it then comes up more often
     api("/api/idea/fav", { method: "POST", body: JSON.stringify({ id: c.idea_id, fav: on }) }).catch(() => toast("没收藏上"));
+  } else if (c.dish) {   // and dishes in 御膳房
+    api("/api/dish/fav", { method: "POST", body: JSON.stringify({ id: c.dish_id, fav: on }) }).catch(() => toast("没收藏上"));
   } else postEvent(c.id, on ? "like" : "clear");
   const burst = heart("burst" + (on ? "" : " off"));
   burst.style.left = `${x}px`;
   burst.style.top = `${y}px`;
   document.body.append(burst);
   setTimeout(() => burst.remove(), 800);
-  toast(c.idea ? (on ? "在探索清单里收藏了，以后多出现" : "已取消收藏") : on ? "已收藏，下滑可以在「收藏」里找到" : "已取消收藏");
+  toast(!on ? "已取消收藏" : c.idea ? "在探索清单里收藏了，以后多出现" : c.dish ? "收藏了这道菜，以后多出现" : "已收藏，以后多出现，下滑可以在「收藏」里找到");
 }
 
-// Double tap on a dish: 就吃这个, logged in 御膳房 (so it comes up less for a few days); 撤销 puts the old date back.
+// 就吃这个 on a dish: logged in 御膳房 (so it comes up less for a few days); 撤销 puts the old date back.
 function eatDish(c) {
   const card = current.el.querySelector(".card");
   card.classList.remove("stamped"); void card.offsetWidth; card.classList.add("stamped");
@@ -467,6 +481,12 @@ stage.addEventListener("touchend", e => {
     const explore = e.target.closest && e.target.closest(".explore");
     if (explore && current && !current.notice) {
       exploreCard(current.card, explore);
+      lastTap = null;
+      return;
+    }
+    const eat = e.target.closest && e.target.closest(".eat");
+    if (eat && current && current.card.dish) {
+      eatDish(current.card);
       lastTap = null;
       return;
     }

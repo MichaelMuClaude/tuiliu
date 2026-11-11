@@ -3,8 +3,8 @@ feed (user, 2026-11-11).
 
 御膳房 keeps the dishes: the feed borrows about one card in ten, for the meal of the hour as 御膳房 itself picks
 (早餐 from 5:00 to 10:30, otherwise 正餐; 不限 dishes always, fruit never), and dishes eaten in the last few days
-less often. A double tap is 就吃这个 (logged in 御膳房), a sideways swipe takes the dish off the menu, and 撤销
-undoes either. If 御膳房 is not running, the feed simply has no dish cards.
+less often. A double tap hearts the dish in 御膳房 (it then comes up more often, the user's one rule for every card), the
+就吃这个 button logs the meal there, a sideways swipe takes the dish off the menu, and 撤销 undoes them. If 御膳房 is not running, the feed simply has no dish cards.
 """
 import datetime
 import logging
@@ -27,11 +27,12 @@ def _meal_now() -> str:
 
 
 def _weight(d: dict) -> float:
-    """As in 御膳房: eaten within a day = rarely, within three days = less often."""
+    """As in 御膳房: eaten within a day = rarely, within three days = less often; hearted = three times as often."""
+    fav = 3 if d.get("fav") else 1
     if not d.get("lastEaten"):
-        return 1
+        return fav
     days = (time.time() * 1000 - d["lastEaten"]) / 864e5
-    return 0.12 if days < 1 else 0.45 if days < 3 else 1
+    return fav * (0.12 if days < 1 else 0.45 if days < 3 else 1)
 
 
 def next_cards(n: int) -> list[dict]:
@@ -66,7 +67,7 @@ def _card(d: dict) -> dict:
     photo = d.get("photo") or ""
     return {"id": "d" + d["id"], "dish_id": d["id"], "dish": True, "title": d["name"],
             "points": [x for x in (d.get("note") or "", " · ".join(d.get("ingredients") or [])) if x],
-            "takeaway": "", "topic": "", "theme": "", "reaction": 0, "liya": False, "review": False,
+            "takeaway": "", "topic": "", "theme": "", "reaction": 1 if d.get("fav") else 0, "liya": False, "review": False,
             "chips": chips, "eaten": _eaten_text(d.get("lastEaten")), "last_eaten": d.get("lastEaten"),
             "image": "/dish/img/" + urllib.parse.quote(photo.rsplit("/", 1)[-1]) if photo else ""}
 
@@ -76,6 +77,6 @@ def image(name: str) -> httpx.Response:
 
 
 def act(dish_id: str, what: str, body: dict) -> dict | None:
-    """what = eaten | delete | restore, passed straight to 御膳房's own API; returns the dish."""
+    """what = eaten | delete | restore | fav, passed straight to 御膳房's own API; returns the dish."""
     r = httpx.post(f"{MENU_URL}/api/dishes/{urllib.parse.quote(dish_id)}/{what}", json=body, timeout=10)
     return r.json() if r.status_code == 200 else None

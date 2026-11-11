@@ -18,6 +18,7 @@ log = logging.getLogger("tuiliu.frame")
 FRAME_URL = os.environ.get("TUILIU_FRAME", "http://127.0.0.1:8096")
 PHOTO_EVERY = 8   # about one card in this many is a photo (user, 2026-11-11)
 FAVOURITES = "收藏"
+FAV_WEIGHT = 3   # favourites come round more often (the user's one rule for every card, 2026-11-11)
 _JSON = {"Content-Type": "application/json"}   # 相框 takes JSON posts only
 
 
@@ -33,7 +34,12 @@ def next_cards(n: int) -> list[dict]:
              "topic": "", "theme": "", "reaction": 1 if p["folder"].strip() == FAVOURITES else 0,
              "liya": False, "review": False, "folder": p["folder"].strip(),
              "image": "/photo/img?" + urllib.parse.urlencode({"p": p["path"], "m": int(p.get("mtime", 0))})}
-            for p in random.sample(photos, min(k, len(photos)))]
+            for p in sorted(photos, key=_key, reverse=True)[:k]]
+
+
+def _key(p: dict) -> float:
+    """A random draw where photos in 收藏 (double-tapped) come up FAV_WEIGHT times as often."""
+    return random.random() ** (1 / (FAV_WEIGHT if p["folder"].strip() == FAVOURITES else 1))
 
 
 def _photos() -> list[dict]:

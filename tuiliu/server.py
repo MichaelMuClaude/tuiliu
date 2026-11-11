@@ -198,14 +198,16 @@ class DishAct(BaseModel):
     id: str
     undo_eaten: bool = False         # put back last_eaten (撤销 of 就吃这个)
     last_eaten: int | None = None
+    fav: bool = False
 
 
 @app.post("/api/dish/{what}")
 def dish_act(what: str, body: DishAct):
-    """eaten (double tap: 就吃这个), delete (a sideways swipe) or restore (撤销), done by 御膳房 itself."""
-    if what not in ("eaten", "delete", "restore"):
+    """eaten (the 就吃这个 button), delete (a sideways swipe), restore (撤销) or fav (double tap), done by 御膳房."""
+    if what not in ("eaten", "delete", "restore", "fav"):
         raise HTTPException(404)
-    payload = {"lastEaten": body.last_eaten} if what == "eaten" and body.undo_eaten else {}
+    payload = ({"lastEaten": body.last_eaten} if what == "eaten" and body.undo_eaten else
+               {"fav": body.fav} if what == "fav" else {})
     try:
         res = dishes.act(body.id, what, payload)
     except Exception:
