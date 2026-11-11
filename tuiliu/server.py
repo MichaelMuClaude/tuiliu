@@ -187,6 +187,12 @@ def manifest():
     return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")
 
 
+def _app_version() -> str:
+    """The app.js?v=N the page asks for; a page open since before an update sees a new one and reloads."""
+    m = re.search(r"app\.js\?v=(\d+)", (STATIC_DIR / "index.html").read_text())
+    return m.group(1) if m else ""
+
+
 @app.get("/api/feed")
 def get_feed(n: int = 8, exclude: str = ""):
     global _last_low_pool_run
@@ -196,7 +202,7 @@ def get_feed(n: int = 8, exclude: str = ""):
     if SCHEDULER and unseen < 30 and time.time() - _last_low_pool_run > 600:
         _last_low_pool_run = time.time()
         _run_in_background(pipeline.run_once, True)
-    return {"cards": cards, "preparing": not cards and bool(db.get_meta("pipeline_running", False))}
+    return {"cards": cards, "preparing": not cards and bool(db.get_meta("pipeline_running", False)), "app": _app_version()}
 
 
 class Event(BaseModel):

@@ -69,7 +69,10 @@ button { font: inherit; color: inherit; }
 .card-img.word { max-height: 62vh; padding: 0; background: none; border-radius: 14px; }
 .word-card .card-foot a.copy { text-decoration: none; }
 .idea-text { font-size: 21px; line-height: 1.55; font-weight: 600; margin: 4px 0 6px; white-space: pre-line; }
-.card-img.photo { max-height: 72vh; padding: 0; background: none; border-radius: 14px; }
+/* photos: as big as the screen allows, with only a thin card around them */
+.photo-card { padding: 10px; gap: 8px; }
+.photo-card .chip { margin: 4px 0 0 4px; }
+.card-img.photo { width: 100%; max-height: calc(100dvh - 150px); padding: 0; background: none; border-radius: 12px; }
 .card-img.small { max-height: 120px; display: block; margin: 0 0 8px; }
 .card h1 { font-size: 23px; line-height: 1.35; margin: 0; font-weight: 700; }
 .points { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }

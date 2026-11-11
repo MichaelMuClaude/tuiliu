@@ -3,6 +3,8 @@
 // One card at a time. Swipe up = next card (no going back). Swipe down = open the topic list.
 // Swipe left or right = this card goes away for good (the same in every app: a word is known, an idea is deleted,
 // a news card never comes back), with 撤销 in the toast. Swipe up = next; borrowed cards come round again later.
+// This page's version (app.js?v=N); the feed says the server's, and an old page reloads itself.
+const APP_VERSION = (document.currentScript && new URL(document.currentScript.src).searchParams.get("v")) || "";
 const stage = document.getElementById("stage");
 const sheet = document.getElementById("topics");
 const sheetBody = document.getElementById("sheetBody");
@@ -267,6 +269,7 @@ function fetchMore() {
   if (!loading) {
     loading = api(`/api/feed?n=8&exclude=${[...seen].filter(id => typeof id === "number").join(",")}`)
       .then(data => {
+        if (data.app && APP_VERSION && data.app !== APP_VERSION) { location.reload(); return; }   // updated meanwhile
         for (const c of data.cards) if (!seen.has(c.id)) { seen.add(c.id); queue.push(c); }
       })
       .catch(() => {})
