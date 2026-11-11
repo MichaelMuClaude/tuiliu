@@ -86,11 +86,11 @@ def search_hn(query: str, days: int = 180, min_points: int = 30) -> list[dict]:
 
 # ---------- ai-browser: Google and web pages in a real Chrome ----------
 # Google blocks headless and fresh automated browsers at once, but answers ai-browser: a long-lived, visible Chrome
-# (its own profile, which can be signed in to Google) driven over HTTP on 127.0.0.1:8888. The news collector and
-# the chat use it like a person would. When Google asks for a CAPTCHA the user solves it over remote desktop.
+# (its own profile, which can be signed in to Google) driven over HTTP on 127.0.0.1:8888. The news collector
+# uses it like a person would. When Google asks for a CAPTCHA the user solves it over remote desktop.
 
 AI_BROWSER = "http://127.0.0.1:8888/api"
-BROWSER_LOCK = threading.RLock()  # one browser window, shared by the news collector and the chat: one job at a time
+BROWSER_LOCK = threading.RLock()  # one browser window, shared by the news collector and Claude sessions: one job at a time
 
 _GOOGLE_JS = """(() => {
   const out = [];

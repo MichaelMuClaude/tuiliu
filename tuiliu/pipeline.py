@@ -126,7 +126,7 @@ def _as_points(points) -> list[str]:
 
 
 def add_written_cards(topic_id: int, cards: list[dict]) -> int:
-    """Cards written without a source article (a series from a session or the chat). Returns how many were added."""
+    """Cards written without a source article (a series from a Claude session). Returns how many were added."""
     n = 0
     with db.tx() as c:
         for k in cards:

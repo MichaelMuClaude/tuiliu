@@ -1,7 +1,7 @@
 "use strict";
 
 // One card at a time. Swipe up = next card (no going back). Swipe down = open the topic list.
-// Swipe left = open the chat (swipe right there to come back).
+// On a word card, swipe left or right = 认识了 (as in GlanceCards), with an undo in the toast.
 const stage = document.getElementById("stage");
 const sheet = document.getElementById("topics");
 const sheetBody = document.getElementById("sheetBody");
@@ -31,11 +31,16 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-function toast(msg) {
-  toastEl.textContent = msg;
+function toast(msg, action) {   // action = [label, fn]: a button in the toast, e.g. 撤销
+  toastEl.replaceChildren(msg);
+  if (action) {
+    const b = h("button", { type: "button" }, action[0]);
+    b.addEventListener("click", () => { toastEl.classList.remove("show"); action[1](); });
+    toastEl.append(b);
+  }
   toastEl.classList.add("show");
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => toastEl.classList.remove("show"), 2400);
+  toast.t = setTimeout(() => toastEl.classList.remove("show"), action ? 4000 : 2400);
 }
 
 async function api(path, opts = {}) {
@@ -164,6 +169,31 @@ async function studyWord(c, b) {
   }
 }
 
+// Swipe a word card sideways: it flies off, GlanceCards moves it to known, and the next card comes in.
+async function swipeKnown(dir) {
+  if (busy || !current || !current.card || !current.card.word) return;
+  const c = current.card;
+  current.el.classList.add("animate");
+  current.el.style.transform = `translateX(${dir * 130}%) rotate(${dir * 12}deg)`;
+  current.gone = true;
+  next();
+  try {
+    await api("/api/word/known", { method: "POST", body: JSON.stringify({ file: c.file }) });
+    toast(`认识了：${c.title}`, ["撤销", undoKnown]);
+  } catch {
+    toast("没记上，词卡服务器没响应");
+  }
+}
+
+async function undoKnown() {
+  try {
+    await api("/api/word/undo", { method: "POST" });
+    toast("撤销了，这个词还会再出现");
+  } catch {
+    toast("没撤销成功");
+  }
+}
+
 function cardSlide(c) {
   if (c.word) return wordSlide(c);
   const label = [c.review ? "❤ 收藏回顾" : "", c.theme, c.topic].filter(Boolean).join(" · ");
@@ -261,7 +291,7 @@ async function next() {
     el.getBoundingClientRect();                 // commit the start position before animating
     setTransform(el, "0", true);
     if (old) {
-      setTransform(old.el, "-100%", true);
+      if (!old.gone) setTransform(old.el, "-100%", true);   // a word card swiped sideways has already left
       setTimeout(() => old.el.remove(), 320);
     }
     current = { el, card, since: performance.now(), notice: !card };
@@ -302,13 +332,14 @@ stage.addEventListener("touchmove", e => {
   if (!touch) return;
   e.preventDefault();
   const { clientX: x, clientY: y } = e.touches[0];
-  // Decide once per touch whether it is a sideways swipe (chat) or an up/down one (cards, topics).
+  // Decide once per touch whether it is a sideways swipe (word cards) or an up/down one (cards, topics).
   if (!touch.axis && Math.max(Math.abs(x - touch.x0), Math.abs(y - touch.y0)) > 10)
     touch.axis = Math.abs(x - touch.x0) > 1.2 * Math.abs(y - touch.y0) ? "x" : "y";
   if (touch.axis === "x") {
     touch.dx = x - touch.x0;
     touch.moved = Math.max(touch.moved, Math.abs(touch.dx));
-    if (touch.dx < 0 && current) current.el.style.transform = `translateX(${touch.dx * 0.25}px)`;
+    if (current && current.card && current.card.word)
+      current.el.style.transform = `translateX(${touch.dx}px) rotate(${touch.dx / 25}deg)`;
     return;
   }
   const step = touch.last - y;
@@ -334,9 +365,11 @@ stage.addEventListener("touchend", e => {
   const { dy, dx, t0, moved, axis, x0 } = touch;
   touch = null;
   if (axis === "x") {
-    if (current) setTransform(current.el, "0", true);
     // Ignore swipes that start at the screen edge: that is the phone's own "back" gesture.
-    if (-dx > SWIPE && x0 > EDGE && x0 < innerWidth - EDGE) { dismissHint(); openChat(); }
+    if (Math.abs(dx) > SWIPE && x0 > EDGE && x0 < innerWidth - EDGE && current && current.card && current.card.word) {
+      dismissHint();
+      swipeKnown(dx > 0 ? 1 : -1);
+    } else if (current) setTransform(current.el, "0", true);
     return;
   }
   const now = performance.now();
@@ -411,8 +444,9 @@ stage.addEventListener("wheel", e => {
 
 document.addEventListener("keydown", e => {
   if (e.target.closest && e.target.closest("textarea, input")) return;
-  if (chatEl.classList.contains("open")) { if (e.key === "Escape") closeChat(); return; }
-  if (e.key === "ArrowLeft") { e.preventDefault(); openChat(); return; }
+  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && current && current.card && current.card.word) {
+    e.preventDefault(); swipeKnown(e.key === "ArrowRight" ? 1 : -1); return;
+  }
   if (sheet.classList.contains("open")) { if (e.key === "Escape" || e.key === "ArrowDown") closeSheet(); return; }
   if (["ArrowDown", " ", "j", "PageDown"].includes(e.key)) { e.preventDefault(); next(); }
   if (["ArrowUp", "k", "PageUp"].includes(e.key)) { e.preventDefault(); openSheet(); }
@@ -584,109 +618,3 @@ async function showLastPush() {
 showLastPush();
 setInterval(showLastPush, 10 * 60 * 1000);
 
-// ---------- chat ----------
-
-const chatEl = document.getElementById("chat");
-const chatLog = document.getElementById("chatLog");
-const chatInput = document.getElementById("chatInput");
-const chatCardEl = document.getElementById("chatCard");
-let chatLoaded = false;
-let chatCard = null;     // the card the chat was opened from; sent along with the next message
-let chatBusy = false;
-
-// Replies use a little Markdown: **bold** is shown bold, everything else as plain text (line breaks kept).
-function richText(text) {
-  return text.split(/\*\*(.+?)\*\*/g).map((part, i) => i % 2 ? h("b", {}, part) : part);
-}
-
-function addMsg(role, text, extra = "") {
-  const el = h("div", { class: `msg ${role} ${extra}`.trim() }, ...(role === "assistant" ? richText(text) : [text]));
-  chatLog.append(el);
-  chatLog.scrollTop = chatLog.scrollHeight;
-  return el;
-}
-
-async function loadChat() {
-  const { messages, has_key } = await api("/api/chat");
-  chatLog.replaceChildren();
-  if (!messages.length) {
-    chatLog.append(h("p", { class: "empty" }, has_key
-      ? "在这里告诉我你想跟进什么新闻（比如珀斯房价），或者想做什么专题（比如 30 张面试英语卡片）。我们聊过的内容都会留着，下次接着聊。"
-      : "聊天需要 API key，现在还没有。"));
-  }
-  for (const m of messages) addMsg(m.role, m.display);
-  chatLoaded = true;
-}
-
-function openChat() {
-  chatCard = current && !current.notice ? current.card : null;
-  chatCardEl.hidden = !chatCard;
-  if (chatCard) chatCardEl.querySelector("span").textContent = `关于这张卡片：${chatCard.title}`;
-  chatEl.classList.add("open");
-  chatEl.setAttribute("aria-hidden", "false");
-  (chatLoaded ? Promise.resolve() : loadChat()).catch(e => toast(e.message))
-    .then(() => { chatLog.scrollTop = chatLog.scrollHeight; });
-}
-
-function closeChat() {
-  chatEl.classList.remove("open");
-  chatEl.setAttribute("aria-hidden", "true");
-  chatInput.blur();
-}
-
-document.getElementById("closeChat").addEventListener("click", closeChat);
-chatCardEl.querySelector("button").addEventListener("click", () => { chatCard = null; chatCardEl.hidden = true; });
-
-chatInput.addEventListener("input", () => {
-  chatInput.style.height = "auto";
-  chatInput.style.height = `${chatInput.scrollHeight}px`;
-});
-// On a computer Enter sends (Shift+Enter for a new line); not while an input method is composing.
-chatInput.addEventListener("keydown", e => {
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) {
-    e.preventDefault();
-    document.getElementById("chatForm").requestSubmit();
-  }
-});
-
-document.getElementById("chatForm").addEventListener("submit", async ev => {
-  ev.preventDefault();
-  const message = chatInput.value.trim();
-  if (!message || chatBusy) return;
-  chatBusy = true;
-  const btn = ev.target.querySelector("button");
-  btn.disabled = true;
-  chatLog.querySelector(".empty")?.remove();
-  addMsg("user", message);
-  chatInput.value = "";
-  chatInput.style.height = "auto";
-  const pending = addMsg("assistant", "思考中…", "pending");
-  const card_id = chatCard ? chatCard.id : null;
-  chatCard = null;
-  chatCardEl.hidden = true;
-  try {
-    const { replies } = await api("/api/chat", { method: "POST", body: JSON.stringify({ message, card_id }) });
-    pending.remove();
-    for (const r of replies) addMsg("assistant", r);
-    if (!replies.length) addMsg("error", "没有收到回复，再试一次？");
-  } catch (e) {
-    pending.remove();
-    addMsg("error", e.message);
-  } finally {
-    chatBusy = false;
-    btn.disabled = false;
-  }
-});
-
-// Swipe right on the chat (not from the screen edge) goes back to the cards.
-let chatTouch = null;
-chatEl.addEventListener("touchstart", e => {
-  const { clientX: x, clientY: y } = e.touches[0];
-  chatTouch = x > EDGE ? { x0: x, y0: y } : null;
-}, { passive: true });
-chatEl.addEventListener("touchend", e => {
-  if (!chatTouch) return;
-  const dx = e.changedTouches[0].clientX - chatTouch.x0, dy = e.changedTouches[0].clientY - chatTouch.y0;
-  chatTouch = null;
-  if (dx > SWIPE && dx > 1.5 * Math.abs(dy)) closeChat();
-});

@@ -1,4 +1,4 @@
-"""Browser tools for the AIs in tuiliu (the chat and the news collector): search Google, open pages, look at the
+"""Browser tools for the AIs in tuiliu (the news collector): search Google, open pages, look at the
 page, click, type, scroll and take screenshots in ai-browser's real Chrome, which is signed in to a Google account
 made for the AI. One window is shared, so a whole job holds sources.BROWSER_LOCK (an RLock) while it browses.
 """

@@ -12,8 +12,6 @@ GLANCECARDS_URL = os.environ.get("TUILIU_GLANCECARDS", "http://127.0.0.1:8090") 
 COLLECTION_DIR = Path(os.environ.get("TUILIU_COLLECTION", Path.home() / "pCloudDrive" / "Collection"))
 
 MODEL = "claude-haiku-5-5"          # judges articles and writes their cards
-CHAT_MODEL = "claude-haiku-5-5"     # the in-app chat (user, 2026-11-06: Haiku is enough for everyday chat)
-SERIES_MODEL = "claude-sonnet-5-5"  # series of cards the chat starts: written once, so worth the better model
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("TUILIU_PORT", "8095"))
 PIPELINE_INTERVAL_MIN = 45

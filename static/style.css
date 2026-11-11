@@ -106,6 +106,10 @@ button { font: inherit; color: inherit; }
   opacity: 0; transition: .25s; pointer-events: none; z-index: 30; max-width: calc(100% - 32px);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast button {
+  pointer-events: auto; margin-left: 12px; background: none; border: 0; padding: 0;
+  color: var(--accent); font: inherit; font-weight: 600; cursor: pointer;
+}
 
 /* ---------- topics: a sheet that drops down from the top ---------- */
 .sheet {
@@ -200,50 +204,6 @@ button { font: inherit; color: inherit; }
 .del.confirm { color: #fff; background: var(--danger); border-color: var(--danger); }
 .status-line { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 20px; white-space: pre-line; }
 
-/* ---------- chat: a page that slides in from the right ---------- */
-.chat {
-  position: fixed; inset: 0; z-index: 25; background: var(--bg);
-  display: flex; flex-direction: column; height: 100dvh;
-  transform: translateX(100%); transition: transform .3s cubic-bezier(.2, .8, .2, 1);
-}
-.chat.open { transform: translateX(0); }
-.chat-head {
-  flex: none; display: flex; align-items: center; gap: 8px;
-  padding: calc(env(safe-area-inset-top) + 10px) 12px 10px; border-bottom: 1px solid var(--line);
-}
-.chat-head b { font-size: 16px; }
-.chat-head .back, .chat-head .spacer { flex: 1; }
-.chat-head .back { text-align: left; background: none; border: 0; color: var(--accent); font-size: 15px; cursor: pointer; padding: 4px 0; }
-.chat-log {
-  flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 16px;
-  display: flex; flex-direction: column; gap: 10px;
-}
-.msg {
-  max-width: min(85%, 560px); padding: 10px 14px; border-radius: 16px;
-  font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
-}
-.msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 6px; }
-.msg.assistant { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
-.msg.pending { color: var(--muted); }
-.msg.error { align-self: center; background: none; color: var(--danger); font-size: 13.5px; }
-.chat-log .empty { margin: auto 0; }
-.chat-card {
-  flex: none; display: flex; align-items: center; gap: 8px; margin: 0 12px 8px;
-  padding: 8px 10px 8px 12px; border-radius: 12px; background: var(--accent-soft);
-  font-size: 13px; color: var(--muted);
-}
-.chat-card[hidden] { display: none; }
-.chat-card span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-card button { flex: none; background: none; border: 0; color: var(--muted); font-size: 14px; cursor: pointer; }
-.chat-form {
-  flex: none; display: flex; gap: 8px; align-items: flex-end;
-  padding: 8px 12px calc(env(safe-area-inset-bottom) + 10px); border-top: 1px solid var(--line);
-}
-.chat-form textarea {
-  flex: 1; min-width: 0; resize: none; max-height: 140px; font: inherit; font-size: 16px; color: var(--text);
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px; line-height: 1.4;
-}
-.chat-form .primary { height: 40px; }
 
 /* copy the card's text */
 .card-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: -4px; }

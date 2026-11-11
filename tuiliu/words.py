@@ -46,3 +46,8 @@ def known(f: str) -> bool:
 def study(f: str) -> bool:
     """不认识: GlanceCards puts the card on its study list, so it comes round more often (in both apps)."""
     return httpx.post(f"{GLANCECARDS_URL}/api/study", params={"f": f}, timeout=10).status_code == 200
+
+
+def undo() -> bool:
+    """Takes back the last card moved to known."""
+    return httpx.post(f"{GLANCECARDS_URL}/api/undo", timeout=10).status_code == 200
