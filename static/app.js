@@ -131,43 +131,29 @@ function exploreButton(c) {
 
 // A word card from GlanceCards: its picture already carries the word, phonetics and Chinese.
 function wordSlide(c) {
-  const known = h("button", { class: "copy known", type: "button" }, "✓ 认识了");
-  known.addEventListener("click", () => knownWord(c, known));   // mouse; taps are handled in touchend
-  const unknown = h("button", { class: "copy unknown", type: "button" }, c.studying ? "✗ 在不认识里" : "✗ 不认识");
-  if (c.studying) unknown.disabled = true;
-  unknown.addEventListener("click", () => studyWord(c, unknown));
+  const unknown = h("button", { class: "copy unknown", type: "button" }, "不认识");
+  unknown.addEventListener("click", () => lookUpWord(c));   // mouse; taps are handled in touchend
   return h("section", { class: "slide" },
     h("article", { class: "card word-card" },
-      h("span", { class: "chip" }, "词卡"),
-      h("img", { class: "card-img word", src: c.image, alt: c.title }),
-      h("div", { class: "card-foot" },
-        unknown, known,
-        c.lookup ? h("a", { class: "copy", href: c.lookup, target: "_blank", rel: "noopener" }, "查词典") : null)));
+      h("div", { class: "word-head" }, h("span", { class: "chip" }, "词卡"), unknown),
+      h("img", { class: "card-img word", src: c.image, alt: c.title })));
 }
 
-async function knownWord(c, b) {
-  if (b.disabled) return;
-  b.disabled = true;
-  try {
-    await api("/api/word/known", { method: "POST", body: JSON.stringify({ file: c.file }) });
-    b.textContent = "✓ 已放进认识的词";
-    toast("这个词以后不会再出现了");
-  } catch {
-    b.disabled = false;
-    toast("没记上，词卡服务器没响应");
-  }
+// 不认识: open the word in the Cambridge dictionary and put it on GlanceCards' study list (it comes round more often).
+// Knowing it is a sideways swipe, like every card.
+function lookUpWord(c) {
+  if (c.lookup) window.open(c.lookup, "_blank", "noopener");   // first, while it still counts as the tap
+  studyWord(c);
 }
 
-async function studyWord(c, b) {
-  if (b.disabled) return;
-  b.disabled = true;
+async function studyWord(c) {
+  if (c.studying) return;
+  c.studying = true;
   try {
     await api("/api/word/study", { method: "POST", body: JSON.stringify({ file: c.file }) });
-    c.studying = true;
-    b.textContent = "✗ 在不认识里";
-    toast("记下了，这个词以后会多出现几次");
+    toast("记下了，这个词以后会多出现");
   } catch {
-    b.disabled = false;
+    c.studying = false;
     toast("没记上，词卡服务器没响应");
   }
 }
@@ -324,7 +310,7 @@ function toggleFavorite(x, y) {
     burst.style.top = `${y}px`;
     document.body.append(burst);
     setTimeout(() => burst.remove(), 800);
-    return studyWord(c, current.el.querySelector(".unknown"));
+    return studyWord(c);
   }
   const on = c.reaction !== 1;
   c.reaction = on ? 1 : 0;
@@ -490,20 +476,8 @@ stage.addEventListener("touchend", e => {
       lastTap = null;
       return;
     }
-    const unknown = e.target.closest && e.target.closest(".unknown");
-    if (unknown && current && current.card.word) {
-      studyWord(current.card, unknown);
-      lastTap = null;
-      return;
-    }
-    const known = e.target.closest && e.target.closest(".known");
-    if (known && current && current.card.word) {
-      knownWord(current.card, known);
-      lastTap = null;
-      return;
-    }
-    if (e.target.closest && e.target.closest("a.copy")) {   // the dictionary link opens as a normal link
-      window.open(e.target.closest("a.copy").href, "_blank", "noopener");
+    if (e.target.closest && e.target.closest(".unknown") && current && current.card.word) {
+      lookUpWord(current.card);
       lastTap = null;
       return;
     }
