@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, explore, feed, ideas, pipeline, seed, weather, words
+from . import db, explore, feed, frame, ideas, pipeline, seed, weather, words
 from .config import HOST, LIYA_CARD_DIR, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -150,6 +150,36 @@ def idea_act(what: str, body: IdeaAct):
     if not ok:
         raise HTTPException(502, "探索清单 did not take it")
     return {"ok": True}
+
+
+@app.get("/photo/img")
+def photo_picture(p: str):
+    """A photo card's picture (1600 px), passed through from 相框, which only serves photos in its library."""
+    try:
+        r = frame.image(p)
+    except Exception:
+        raise HTTPException(502)
+    if r.status_code != 200:
+        raise HTTPException(404)
+    return Response(r.content, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
+
+
+class PhotoAct(BaseModel):
+    path: str = ""
+
+
+@app.post("/api/photo/{what}")
+def photo_act(what: str, body: PhotoAct):
+    """trash (a sideways swipe), like (double tap: into 收藏) or undo (撤销), done by 相框 itself."""
+    if what not in ("trash", "like", "undo") or (what != "undo" and not body.path):
+        raise HTTPException(404)
+    try:
+        res = frame.act(what, body.path if what != "undo" else "")
+    except Exception:
+        res = None
+    if res is None:
+        raise HTTPException(502, "相框 did not take it")
+    return {"ok": True, "path": (res.get("photo") or {}).get("path", "")}
 
 
 @app.get("/manifest.webmanifest")

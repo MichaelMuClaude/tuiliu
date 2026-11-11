@@ -170,8 +170,8 @@ async function studyWord(c, b) {
   }
 }
 
-// Word cards come from GlanceCards and idea cards from 探索清单: those apps keep them, so no feed events.
-const borrowed = c => !!(c && (c.word || c.idea));
+// Word cards come from GlanceCards, idea cards from 探索清单 and photos from 相框: those apps keep them, so no feed events.
+const borrowed = c => !!(c && (c.word || c.idea || c.photo));
 const localDay = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 
 // A sideways swipe: the card flies off, the next one comes in, and the card is put away where it belongs.
@@ -186,6 +186,9 @@ async function swipeAway(dir) {
     if (c.word) {
       await api("/api/word/known", { method: "POST", body: JSON.stringify({ file: c.file }) });
       toast(`认识了：${c.title}`, ["撤销", () => undo("/api/word/undo", {}, "这个词还会再出现")]);
+    } else if (c.photo) {
+      await api("/api/photo/trash", { method: "POST", body: JSON.stringify({ path: c.path }) });
+      toast("照片移到回收站了", ["撤销", () => undo("/api/photo/undo", {}, "照片放回去了")]);
     } else if (c.idea) {
       await api("/api/idea/delete", { method: "POST", body: JSON.stringify({ id: c.idea_id, today: localDay() }) });
       toast("从探索清单删掉了", ["撤销", () => undo("/api/idea/restore", { id: c.idea_id }, "放回探索清单了")]);
@@ -195,7 +198,7 @@ async function swipeAway(dir) {
       toast("这张不会再出现", ["撤销", () => { postEvent(c.id, before === 1 ? "like" : "clear"); toast("撤销了"); }]);
     }
   } catch {
-    toast(c.word ? "没记上，词卡服务器没响应" : "没删掉，探索清单没响应");
+    toast(c.word ? "没记上，词卡服务器没响应" : c.photo ? "没删掉，相框没响应" : "没删掉，探索清单没响应");
   }
 }
 
@@ -206,6 +209,15 @@ async function undo(path, body, done) {
   } catch {
     toast("没撤销成功");
   }
+}
+
+// A photo from 相框: the picture alone, with its folder.
+function photoSlide(c) {
+  return h("section", { class: "slide" },
+    h("article", { class: "card photo-card" + (c.reaction === 1 ? " faved" : "") },
+      heart("fav-mark"),
+      h("span", { class: "chip" }, ["相框", c.folder].filter(Boolean).join(" · ")),
+      h("img", { class: "card-img photo", src: c.image, alt: "" })));
 }
 
 // An idea card from 探索清单: its text (and picture, if it has one) and the day it is for.
@@ -221,6 +233,7 @@ function ideaSlide(c) {
 function cardSlide(c) {
   if (c.word) return wordSlide(c);
   if (c.idea) return ideaSlide(c);
+  if (c.photo) return photoSlide(c);
   const label = [c.review ? "❤ 收藏回顾" : "", c.theme, c.topic].filter(Boolean).join(" · ");
   return h("section", { class: "slide" },
     h("article", { class: "card" + (c.reaction === 1 ? " faved" : "") },
@@ -279,6 +292,7 @@ function postEvent(card_id, type) {
 function toggleFavorite(x, y) {
   if (!current || current.notice || current.card.word) return;
   const c = current.card;
+  if (c.photo) return likePhoto(c, x, y);
   const on = c.reaction !== 1;
   c.reaction = on ? 1 : 0;
   current.el.querySelector(".card").classList.toggle("faved", on);
@@ -291,6 +305,22 @@ function toggleFavorite(x, y) {
   document.body.append(burst);
   setTimeout(() => burst.remove(), 800);
   toast(c.idea ? (on ? "在探索清单里收藏了，以后多出现" : "已取消收藏") : on ? "已收藏，下滑可以在「收藏」里找到" : "已取消收藏");
+}
+
+// Double tap on a photo: 相框 moves it into 收藏 (once; 撤销 takes it back out).
+function likePhoto(c, x, y) {
+  if (c.reaction === 1) { toast("已经在收藏里了"); return; }
+  c.reaction = 1;
+  current.el.querySelector(".card").classList.add("faved");
+  const burst = heart("burst");
+  burst.style.left = `${x}px`;
+  burst.style.top = `${y}px`;
+  document.body.append(burst);
+  setTimeout(() => burst.remove(), 800);
+  api("/api/photo/like", { method: "POST", body: JSON.stringify({ path: c.path }) })
+    .then(r => { if (r.path) c.path = r.path; })   // it now lives in 收藏
+    .then(() => toast("收藏了，移到「收藏」文件夹", ["撤销", () => undo("/api/photo/undo", {}, "照片放回原来的文件夹了")]))
+    .catch(() => toast("没收藏上，相框没响应"));
 }
 
 function setTransform(el, y, animate) {

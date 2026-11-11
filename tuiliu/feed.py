@@ -3,13 +3,13 @@
 Topics come up at random, all equally often (the user's wish, 2026-11-06: no learned topic weights).
 The one exception, also the user's choice (2026-11-11): 莉娅's cards of the day come up about one card in eight.
 English word cards from GlanceCards (words.py) are mixed in at about one card in five, and 探索清单 ideas (ideas.py)
-at about one in six, never before the weather.
+at about one in six, and 相框 photos (frame.py) at about one in eight, never before the weather.
 """
 import json
 import random
 from collections import defaultdict
 
-from . import db, ideas, weather, words
+from . import db, frame, ideas, weather, words
 
 RECENT_TOPICS = 6       # a topic among the last few cards seen waits until others have had a turn
 RECYCLE_AFTER_DAYS = 21  # evergreen cards may come back after this long
@@ -92,7 +92,7 @@ def next_cards(n: int, exclude: set[int]) -> list[dict]:
         "topic": c["topic"], "theme": c["theme"], "reaction": c["reaction"], "image": c["image"],
         "liya": c["kind"] == "liya", "review": c is review,
     } for c in picked]
-    for extra in words.next_cards(n) + ideas.next_cards(n):
+    for extra in words.next_cards(n) + ideas.next_cards(n) + frame.next_cards(n):
         out.insert(random.randrange(1, len(out) + 1) if out else 0, extra)
     return out
 
