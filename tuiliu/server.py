@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, explore, feed, pipeline, seed, weather, words
+from . import db, explore, feed, ideas, pipeline, seed, weather, words
 from .config import HOST, LIYA_CARD_DIR, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -116,6 +116,39 @@ def word_undo():
         ok = False
     if not ok:
         raise HTTPException(502, "GlanceCards did not take it")
+    return {"ok": True}
+
+
+@app.get("/idea/img/{name}")
+def idea_picture(name: str):
+    """An idea card's picture, passed through from 探索清单."""
+    try:
+        r = ideas.image(name)
+    except Exception:
+        raise HTTPException(502)
+    if r.status_code != 200:
+        raise HTTPException(404)
+    return Response(r.content, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+class IdeaAct(BaseModel):
+    id: str
+    fav: bool = False
+    today: str = ""
+
+
+@app.post("/api/idea/{what}")
+def idea_act(what: str, body: IdeaAct):
+    """delete (a sideways swipe), restore (its undo) or fav (double tap), done in 探索清单 itself."""
+    if what not in ("delete", "restore", "fav"):
+        raise HTTPException(404)
+    payload = {"fav": body.fav} if what == "fav" else ({"today": body.today} if body.today else {})
+    try:
+        ok = ideas.act(body.id, what, payload)
+    except Exception:
+        ok = False
+    if not ok:
+        raise HTTPException(502, "探索清单 did not take it")
     return {"ok": True}
 
 

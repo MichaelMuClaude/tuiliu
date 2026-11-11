@@ -1,7 +1,8 @@
 "use strict";
 
 // One card at a time. Swipe up = next card (no going back). Swipe down = open the topic list.
-// On a word card, swipe left or right = 认识了 (as in GlanceCards), with an undo in the toast.
+// Swipe left or right = this card goes away for good (the same in every app: a word is known, an idea is deleted,
+// a news card never comes back), with 撤销 in the toast. Swipe up = next; borrowed cards come round again later.
 const stage = document.getElementById("stage");
 const sheet = document.getElementById("topics");
 const sheetBody = document.getElementById("sheetBody");
@@ -169,33 +170,57 @@ async function studyWord(c, b) {
   }
 }
 
-// Swipe a word card sideways: it flies off, GlanceCards moves it to known, and the next card comes in.
-async function swipeKnown(dir) {
-  if (busy || !current || !current.card || !current.card.word) return;
+// Word cards come from GlanceCards and idea cards from 探索清单: those apps keep them, so no feed events.
+const borrowed = c => !!(c && (c.word || c.idea));
+const localDay = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+
+// A sideways swipe: the card flies off, the next one comes in, and the card is put away where it belongs.
+async function swipeAway(dir) {
+  if (busy || !current || current.notice || !current.card) return;
   const c = current.card;
   current.el.classList.add("animate");
   current.el.style.transform = `translateX(${dir * 130}%) rotate(${dir * 12}deg)`;
   current.gone = true;
   next();
   try {
-    await api("/api/word/known", { method: "POST", body: JSON.stringify({ file: c.file }) });
-    toast(`认识了：${c.title}`, ["撤销", undoKnown]);
+    if (c.word) {
+      await api("/api/word/known", { method: "POST", body: JSON.stringify({ file: c.file }) });
+      toast(`认识了：${c.title}`, ["撤销", () => undo("/api/word/undo", {}, "这个词还会再出现")]);
+    } else if (c.idea) {
+      await api("/api/idea/delete", { method: "POST", body: JSON.stringify({ id: c.idea_id, today: localDay() }) });
+      toast("从探索清单删掉了", ["撤销", () => undo("/api/idea/restore", { id: c.idea_id }, "放回探索清单了")]);
+    } else {
+      const before = c.reaction;
+      postEvent(c.id, "dislike");
+      toast("这张不会再出现", ["撤销", () => { postEvent(c.id, before === 1 ? "like" : "clear"); toast("撤销了"); }]);
+    }
   } catch {
-    toast("没记上，词卡服务器没响应");
+    toast(c.word ? "没记上，词卡服务器没响应" : "没删掉，探索清单没响应");
   }
 }
 
-async function undoKnown() {
+async function undo(path, body, done) {
   try {
-    await api("/api/word/undo", { method: "POST" });
-    toast("撤销了，这个词还会再出现");
+    await api(path, { method: "POST", body: JSON.stringify(body) });
+    toast("撤销了，" + done);
   } catch {
     toast("没撤销成功");
   }
 }
 
+// An idea card from 探索清单: its text (and picture, if it has one) and the day it is for.
+function ideaSlide(c) {
+  return h("section", { class: "slide" },
+    h("article", { class: "card idea-card" + (c.reaction === 1 ? " faved" : "") },
+      heart("fav-mark"),
+      h("span", { class: "chip" }, ["探索清单", c.when].filter(Boolean).join(" · ")),
+      c.image ? h("img", { class: "card-img", src: c.image, alt: "" }) : null,
+      h("p", { class: "idea-text" }, c.title)));
+}
+
 function cardSlide(c) {
   if (c.word) return wordSlide(c);
+  if (c.idea) return ideaSlide(c);
   const label = [c.review ? "❤ 收藏回顾" : "", c.theme, c.topic].filter(Boolean).join(" · ");
   return h("section", { class: "slide" },
     h("article", { class: "card" + (c.reaction === 1 ? " faved" : "") },
@@ -238,7 +263,7 @@ function fetchMore() {
 }
 
 function sendView() {
-  if (!current || current.notice || current.sent || current.card.word) return;   // word cards: GlanceCards' own
+  if (!current || current.notice || current.sent || borrowed(current.card)) return;
   current.sent = true;
   const body = JSON.stringify({ card_id: current.card.id, type: "view", dwell_ms: Math.round(performance.now() - current.since) });
   if (navigator.sendBeacon) navigator.sendBeacon("/api/event", new Blob([body], { type: "application/json" }));
@@ -257,13 +282,15 @@ function toggleFavorite(x, y) {
   const on = c.reaction !== 1;
   c.reaction = on ? 1 : 0;
   current.el.querySelector(".card").classList.toggle("faved", on);
-  postEvent(c.id, on ? "like" : "clear");
+  if (c.idea) {   // hearted in 探索清单 itself, where it then comes up more often
+    api("/api/idea/fav", { method: "POST", body: JSON.stringify({ id: c.idea_id, fav: on }) }).catch(() => toast("没收藏上"));
+  } else postEvent(c.id, on ? "like" : "clear");
   const burst = heart("burst" + (on ? "" : " off"));
   burst.style.left = `${x}px`;
   burst.style.top = `${y}px`;
   document.body.append(burst);
   setTimeout(() => burst.remove(), 800);
-  toast(on ? "已收藏，下滑可以在「收藏」里找到" : "已取消收藏");
+  toast(c.idea ? (on ? "在探索清单里收藏了，以后多出现" : "已取消收藏") : on ? "已收藏，下滑可以在「收藏」里找到" : "已取消收藏");
 }
 
 function setTransform(el, y, animate) {
@@ -338,7 +365,7 @@ stage.addEventListener("touchmove", e => {
   if (touch.axis === "x") {
     touch.dx = x - touch.x0;
     touch.moved = Math.max(touch.moved, Math.abs(touch.dx));
-    if (current && current.card && current.card.word)
+    if (current && current.card)
       current.el.style.transform = `translateX(${touch.dx}px) rotate(${touch.dx / 25}deg)`;
     return;
   }
@@ -366,9 +393,9 @@ stage.addEventListener("touchend", e => {
   touch = null;
   if (axis === "x") {
     // Ignore swipes that start at the screen edge: that is the phone's own "back" gesture.
-    if (Math.abs(dx) > SWIPE && x0 > EDGE && x0 < innerWidth - EDGE && current && current.card && current.card.word) {
+    if (Math.abs(dx) > SWIPE && x0 > EDGE && x0 < innerWidth - EDGE && current && current.card) {
       dismissHint();
-      swipeKnown(dx > 0 ? 1 : -1);
+      swipeAway(dx > 0 ? 1 : -1);
     } else if (current) setTransform(current.el, "0", true);
     return;
   }
@@ -444,8 +471,8 @@ stage.addEventListener("wheel", e => {
 
 document.addEventListener("keydown", e => {
   if (e.target.closest && e.target.closest("textarea, input")) return;
-  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && current && current.card && current.card.word) {
-    e.preventDefault(); swipeKnown(e.key === "ArrowRight" ? 1 : -1); return;
+  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && current && current.card) {
+    e.preventDefault(); swipeAway(e.key === "ArrowRight" ? 1 : -1); return;
   }
   if (sheet.classList.contains("open")) { if (e.key === "Escape" || e.key === "ArrowDown") closeSheet(); return; }
   if (["ArrowDown", " ", "j", "PageDown"].includes(e.key)) { e.preventDefault(); next(); }
