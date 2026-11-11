@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, explore, feed, frame, ideas, pipeline, seed, weather, words
+from . import db, dishes, explore, feed, frame, ideas, pipeline, seed, weather, words
 from .config import HOST, LIYA_CARD_DIR, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -180,6 +180,39 @@ def photo_act(what: str, body: PhotoAct):
     if res is None:
         raise HTTPException(502, "相框 did not take it")
     return {"ok": True, "path": (res.get("photo") or {}).get("path", "")}
+
+
+@app.get("/dish/img/{name}")
+def dish_picture(name: str):
+    """A dish card's photo, passed through from 御膳房."""
+    try:
+        r = dishes.image(name)
+    except Exception:
+        raise HTTPException(502)
+    if r.status_code != 200:
+        raise HTTPException(404)
+    return Response(r.content, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+class DishAct(BaseModel):
+    id: str
+    undo_eaten: bool = False         # put back last_eaten (撤销 of 就吃这个)
+    last_eaten: int | None = None
+
+
+@app.post("/api/dish/{what}")
+def dish_act(what: str, body: DishAct):
+    """eaten (double tap: 就吃这个), delete (a sideways swipe) or restore (撤销), done by 御膳房 itself."""
+    if what not in ("eaten", "delete", "restore"):
+        raise HTTPException(404)
+    payload = {"lastEaten": body.last_eaten} if what == "eaten" and body.undo_eaten else {}
+    try:
+        res = dishes.act(body.id, what, payload)
+    except Exception:
+        res = None
+    if res is None:
+        raise HTTPException(502, "御膳房 did not take it")
+    return {"ok": True}
 
 
 @app.get("/manifest.webmanifest")

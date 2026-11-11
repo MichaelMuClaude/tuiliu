@@ -73,6 +73,17 @@ button { font: inherit; color: inherit; }
 .photo-card { padding: 10px; gap: 8px; }
 .photo-card .chip { margin: 4px 0 0 4px; }
 .card-img.photo { width: 100%; max-height: calc(100dvh - 150px); padding: 0; background: none; border-radius: 12px; }
+.card-img.dish { max-height: 40vh; padding: 0; background: none; border-radius: 14px; }
+.dish-eaten { margin: 0; color: var(--muted); font-size: 13px; }
+.dish-card .stamp {
+  position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%) rotate(-12deg) scale(.6); opacity: 0;
+  padding: 6px 20px; border: 3px solid #fff; border-radius: 10px; background: #d23a2a; color: #fff;
+  font-size: 30px; font-weight: 800; letter-spacing: 4px; pointer-events: none;
+}
+.dish-card.stamped .stamp { animation: stamp 1.6s ease-out forwards; }
+@keyframes stamp { 0% { opacity: 0; transform: translate(-50%, -50%) rotate(-12deg) scale(1.6); }
+  15%, 70% { opacity: 1; transform: translate(-50%, -50%) rotate(-12deg) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(-12deg) scale(1); } }
 .card-img.small { max-height: 120px; display: block; margin: 0 0 8px; }
 .card h1 { font-size: 23px; line-height: 1.35; margin: 0; font-weight: 700; }
 .points { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }

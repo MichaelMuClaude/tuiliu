@@ -172,8 +172,9 @@ async function studyWord(c, b) {
   }
 }
 
-// Word cards come from GlanceCards, idea cards from 探索清单 and photos from 相框: those apps keep them, so no feed events.
-const borrowed = c => !!(c && (c.word || c.idea || c.photo));
+// Word cards come from GlanceCards, ideas from 探索清单, photos from 相框 and dishes from 御膳房: those apps keep
+// them, so no feed events.
+const borrowed = c => !!(c && (c.word || c.idea || c.photo || c.dish));
 const localDay = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 
 // A sideways swipe: the card flies off, the next one comes in, and the card is put away where it belongs.
@@ -188,6 +189,9 @@ async function swipeAway(dir) {
     if (c.word) {
       await api("/api/word/known", { method: "POST", body: JSON.stringify({ file: c.file }) });
       toast(`认识了：${c.title}`, ["撤销", () => undo("/api/word/undo", {}, "这个词还会再出现")]);
+    } else if (c.dish) {
+      await api("/api/dish/delete", { method: "POST", body: JSON.stringify({ id: c.dish_id }) });
+      toast(`从御膳房菜单拿掉了：${c.title}`, ["撤销", () => undo("/api/dish/restore", { id: c.dish_id }, "放回菜单了")]);
     } else if (c.photo) {
       await api("/api/photo/trash", { method: "POST", body: JSON.stringify({ path: c.path }) });
       toast("照片移到回收站了", ["撤销", () => undo("/api/photo/undo", {}, "照片放回去了")]);
@@ -200,7 +204,7 @@ async function swipeAway(dir) {
       toast("这张不会再出现", ["撤销", () => { postEvent(c.id, before === 1 ? "like" : "clear"); toast("撤销了"); }]);
     }
   } catch {
-    toast(c.word ? "没记上，词卡服务器没响应" : c.photo ? "没删掉，相框没响应" : "没删掉，探索清单没响应");
+    toast(c.word ? "没记上，词卡服务器没响应" : c.photo ? "没删掉，相框没响应" : c.dish ? "没删掉，御膳房没响应" : "没删掉，探索清单没响应");
   }
 }
 
@@ -211,6 +215,18 @@ async function undo(path, body, done) {
   } catch {
     toast("没撤销成功");
   }
+}
+
+// A dish from 御膳房: photo, name, how to make it and what goes in; double tap = 就吃这个.
+function dishSlide(c) {
+  return h("section", { class: "slide" },
+    h("article", { class: "card dish-card" },
+      h("span", { class: "chip" }, ["御膳房", ...c.chips].join(" · ")),
+      c.image ? h("img", { class: "card-img dish", src: c.image, alt: "" }) : null,
+      h("h1", {}, c.title),
+      h("ul", { class: "points" }, c.points.map(p => h("li", {}, p))),
+      h("p", { class: "dish-eaten" }, c.eaten, " · 双击 = 就吃这个"),
+      h("div", { class: "stamp" }, "就它了")));
 }
 
 // A photo from 相框: the picture alone, with its folder.
@@ -236,6 +252,7 @@ function cardSlide(c) {
   if (c.word) return wordSlide(c);
   if (c.idea) return ideaSlide(c);
   if (c.photo) return photoSlide(c);
+  if (c.dish) return dishSlide(c);
   const label = [c.review ? "❤ 收藏回顾" : "", c.theme, c.topic].filter(Boolean).join(" · ");
   return h("section", { class: "slide" },
     h("article", { class: "card" + (c.reaction === 1 ? " faved" : "") },
@@ -296,6 +313,7 @@ function toggleFavorite(x, y) {
   if (!current || current.notice || current.card.word) return;
   const c = current.card;
   if (c.photo) return likePhoto(c, x, y);
+  if (c.dish) return eatDish(c);
   const on = c.reaction !== 1;
   c.reaction = on ? 1 : 0;
   current.el.querySelector(".card").classList.toggle("faved", on);
@@ -308,6 +326,16 @@ function toggleFavorite(x, y) {
   document.body.append(burst);
   setTimeout(() => burst.remove(), 800);
   toast(c.idea ? (on ? "在探索清单里收藏了，以后多出现" : "已取消收藏") : on ? "已收藏，下滑可以在「收藏」里找到" : "已取消收藏");
+}
+
+// Double tap on a dish: 就吃这个, logged in 御膳房 (so it comes up less for a few days); 撤销 puts the old date back.
+function eatDish(c) {
+  const card = current.el.querySelector(".card");
+  card.classList.remove("stamped"); void card.offsetWidth; card.classList.add("stamped");
+  const before = c.last_eaten ?? null;
+  api("/api/dish/eaten", { method: "POST", body: JSON.stringify({ id: c.dish_id }) })
+    .then(() => toast(`好，就吃${c.title}`, ["撤销", () => undo("/api/dish/eaten", { id: c.dish_id, undo_eaten: true, last_eaten: before }, "没记这一顿")]))
+    .catch(() => toast("没记上，御膳房没响应"));
 }
 
 // Double tap on a photo: 相框 moves it into 收藏 (once; 撤销 takes it back out).
