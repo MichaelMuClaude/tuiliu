@@ -6,11 +6,11 @@ import threading
 import time
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import chat, db, explore, feed, pipeline, seed, weather
+from . import chat, db, explore, feed, pipeline, seed, weather, words
 from .config import HOST, LIYA_CARD_DIR, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
@@ -64,6 +64,35 @@ def liya_picture(name: str):
     if "/" in name or p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp") or not p.is_file():
         raise HTTPException(404)
     return FileResponse(p, headers={"Cache-Control": "max-age=86400"})
+
+
+@app.get("/word/img")
+def word_picture(f: str):
+    """A word card's picture, passed through from GlanceCards (which only serves its own cards)."""
+    try:
+        r = words.image(f)
+    except Exception:
+        raise HTTPException(502)
+    if r.status_code != 200:
+        raise HTTPException(404)
+    return Response(r.content, media_type=r.headers.get("content-type", "image/jpeg"),
+                    headers={"Cache-Control": "private, max-age=86400"})
+
+
+class WordKnown(BaseModel):
+    file: str
+
+
+@app.post("/api/word/known")
+def word_known(body: WordKnown):
+    """Got it: GlanceCards moves the card to its known pile, as if it had been swiped there."""
+    try:
+        ok = words.known(body.file)
+    except Exception:
+        ok = False
+    if not ok:
+        raise HTTPException(502, "GlanceCards did not take it")
+    return {"ok": True}
 
 
 @app.get("/manifest.webmanifest")

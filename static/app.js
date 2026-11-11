@@ -121,7 +121,34 @@ function exploreButton(c) {
   return b;
 }
 
+// A word card from GlanceCards: its picture already carries the word, phonetics and Chinese.
+function wordSlide(c) {
+  const known = h("button", { class: "copy known", type: "button" }, "✓ 认识了");
+  known.addEventListener("click", () => knownWord(c, known));   // mouse; taps are handled in touchend
+  return h("section", { class: "slide" },
+    h("article", { class: "card word-card" },
+      h("span", { class: "chip" }, "词卡"),
+      h("img", { class: "card-img word", src: c.image, alt: c.title }),
+      h("div", { class: "card-foot" },
+        known,
+        c.lookup ? h("a", { class: "copy", href: c.lookup, target: "_blank", rel: "noopener" }, "查词典") : null)));
+}
+
+async function knownWord(c, b) {
+  if (b.disabled) return;
+  b.disabled = true;
+  try {
+    await api("/api/word/known", { method: "POST", body: JSON.stringify({ file: c.file }) });
+    b.textContent = "✓ 已放进认识的词";
+    toast("这个词以后不会再出现了");
+  } catch {
+    b.disabled = false;
+    toast("没记上，词卡服务器没响应");
+  }
+}
+
 function cardSlide(c) {
+  if (c.word) return wordSlide(c);
   const label = [c.review ? "❤ 收藏回顾" : "", c.theme, c.topic].filter(Boolean).join(" · ");
   return h("section", { class: "slide" },
     h("article", { class: "card" + (c.reaction === 1 ? " faved" : "") },
@@ -153,7 +180,7 @@ async function emptySlide() {
 
 function fetchMore() {
   if (!loading) {
-    loading = api(`/api/feed?n=8&exclude=${[...seen].join(",")}`)
+    loading = api(`/api/feed?n=8&exclude=${[...seen].filter(id => typeof id === "number").join(",")}`)
       .then(data => {
         for (const c of data.cards) if (!seen.has(c.id)) { seen.add(c.id); queue.push(c); }
       })
@@ -164,7 +191,7 @@ function fetchMore() {
 }
 
 function sendView() {
-  if (!current || current.notice || current.sent) return;
+  if (!current || current.notice || current.sent || current.card.word) return;   // word cards: GlanceCards' own
   current.sent = true;
   const body = JSON.stringify({ card_id: current.card.id, type: "view", dwell_ms: Math.round(performance.now() - current.since) });
   if (navigator.sendBeacon) navigator.sendBeacon("/api/event", new Blob([body], { type: "application/json" }));
@@ -178,7 +205,7 @@ function postEvent(card_id, type) {
 
 // Double tap: favourite the card on screen; a second double tap takes it back.
 function toggleFavorite(x, y) {
-  if (!current || current.notice) return;
+  if (!current || current.notice || current.card.word) return;
   const c = current.card;
   const on = c.reaction !== 1;
   c.reaction = on ? 1 : 0;
@@ -302,6 +329,17 @@ stage.addEventListener("touchend", e => {
     const explore = e.target.closest && e.target.closest(".explore");
     if (explore && current && !current.notice) {
       exploreCard(current.card, explore);
+      lastTap = null;
+      return;
+    }
+    const known = e.target.closest && e.target.closest(".known");
+    if (known && current && current.card.word) {
+      knownWord(current.card, known);
+      lastTap = null;
+      return;
+    }
+    if (e.target.closest && e.target.closest("a.copy")) {   // the dictionary link opens as a normal link
+      window.open(e.target.closest("a.copy").href, "_blank", "noopener");
       lastTap = null;
       return;
     }
