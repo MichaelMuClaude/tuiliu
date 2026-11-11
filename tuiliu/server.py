@@ -95,6 +95,18 @@ def word_known(body: WordKnown):
     return {"ok": True}
 
 
+@app.post("/api/word/study")
+def word_study(body: WordKnown):
+    """不认识: GlanceCards adds the card to its study list, so it comes round more often."""
+    try:
+        ok = words.study(body.file)
+    except Exception:
+        ok = False
+    if not ok:
+        raise HTTPException(502, "GlanceCards did not take it")
+    return {"ok": True}
+
+
 @app.get("/manifest.webmanifest")
 def manifest():
     return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")

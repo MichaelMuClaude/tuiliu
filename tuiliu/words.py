@@ -30,7 +30,7 @@ def next_cards(n: int) -> list[dict]:
         return []
     return [{"id": "w" + c["id"], "file": c["id"], "title": c["word"], "points": [], "takeaway": "",
              "topic": "", "theme": "", "reaction": 0, "liya": False, "review": False, "word": True,
-             "lookup": c.get("lookup", ""), "image": "/word/img?f=" + urllib.parse.quote(c["id"], safe="")}
+             "lookup": c.get("lookup", ""), "studying": c.get("featured", False), "image": "/word/img?f=" + urllib.parse.quote(c["id"], safe="")}
             for c in got]
 
 
@@ -41,3 +41,8 @@ def image(f: str) -> httpx.Response:
 def known(f: str) -> bool:
     """Tell GlanceCards the reader knows this card (it moves to the known pile)."""
     return httpx.post(f"{GLANCECARDS_URL}/api/known", params={"f": f}, timeout=10).status_code == 200
+
+
+def study(f: str) -> bool:
+    """不认识: GlanceCards puts the card on its study list, so it comes round more often (in both apps)."""
+    return httpx.post(f"{GLANCECARDS_URL}/api/study", params={"f": f}, timeout=10).status_code == 200

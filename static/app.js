@@ -125,12 +125,15 @@ function exploreButton(c) {
 function wordSlide(c) {
   const known = h("button", { class: "copy known", type: "button" }, "✓ 认识了");
   known.addEventListener("click", () => knownWord(c, known));   // mouse; taps are handled in touchend
+  const unknown = h("button", { class: "copy unknown", type: "button" }, c.studying ? "✗ 在不认识里" : "✗ 不认识");
+  if (c.studying) unknown.disabled = true;
+  unknown.addEventListener("click", () => studyWord(c, unknown));
   return h("section", { class: "slide" },
     h("article", { class: "card word-card" },
       h("span", { class: "chip" }, "词卡"),
       h("img", { class: "card-img word", src: c.image, alt: c.title }),
       h("div", { class: "card-foot" },
-        known,
+        unknown, known,
         c.lookup ? h("a", { class: "copy", href: c.lookup, target: "_blank", rel: "noopener" }, "查词典") : null)));
 }
 
@@ -141,6 +144,20 @@ async function knownWord(c, b) {
     await api("/api/word/known", { method: "POST", body: JSON.stringify({ file: c.file }) });
     b.textContent = "✓ 已放进认识的词";
     toast("这个词以后不会再出现了");
+  } catch {
+    b.disabled = false;
+    toast("没记上，词卡服务器没响应");
+  }
+}
+
+async function studyWord(c, b) {
+  if (b.disabled) return;
+  b.disabled = true;
+  try {
+    await api("/api/word/study", { method: "POST", body: JSON.stringify({ file: c.file }) });
+    c.studying = true;
+    b.textContent = "✗ 在不认识里";
+    toast("记下了，这个词以后会多出现几次");
   } catch {
     b.disabled = false;
     toast("没记上，词卡服务器没响应");
@@ -329,6 +346,12 @@ stage.addEventListener("touchend", e => {
     const explore = e.target.closest && e.target.closest(".explore");
     if (explore && current && !current.notice) {
       exploreCard(current.card, explore);
+      lastTap = null;
+      return;
+    }
+    const unknown = e.target.closest && e.target.closest(".unknown");
+    if (unknown && current && current.card.word) {
+      studyWord(current.card, unknown);
       lastTap = null;
       return;
     }
