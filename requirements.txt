@@ -1,4 +1,5 @@
 anthropic==2.4.0
+cryptography==46.0.5
 fastapi==0.162.0
 feedparser==6.0.14
 httpx==0.28.1

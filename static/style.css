@@ -219,6 +219,8 @@ button { font: inherit; color: inherit; }
   padding: 6px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
 }
 .del.confirm { color: #fff; background: var(--danger); border-color: var(--danger); }
+.push-row { text-align: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; }
+.push-row button { font: inherit; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
 .status-line { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 20px; white-space: pre-line; }
 
 

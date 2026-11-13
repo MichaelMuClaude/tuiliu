@@ -10,13 +10,14 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, dishes, explore, feed, frame, ideas, pipeline, seed, weather, words
+from . import db, dishes, explore, feed, frame, ideas, pipeline, push, seed, weather, words
 from .config import HOST, LIYA_CARD_DIR, PIPELINE_INTERVAL_MIN, PORT, SCHEDULER, STATIC_DIR, has_api_key
 
 log = logging.getLogger("tuiliu.server")
 app = FastAPI(title="推流")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 _last_low_pool_run = 0.0
+_push_lock = threading.Lock()
 
 
 def _run_in_background(fn, *args) -> None:
@@ -220,6 +221,55 @@ def dish_act(what: str, body: DishAct):
 @app.get("/manifest.webmanifest")
 def manifest():
     return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")
+
+
+# Web push (2026-11-13, the user's wish, same as their 水与步 app): the page subscribes from the topics sheet;
+# Claude / 莉娅 send with POST /api/push/send. The service worker must sit at / so its scope is the whole app.
+@app.get("/sw.js")
+def service_worker():
+    return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/push/key")
+def push_key():
+    return {"key": push.public_key()}
+
+
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSub(BaseModel):
+    endpoint: str
+    keys: PushKeys
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(sub: PushSub):
+    if not sub.endpoint.startswith("https://"):
+        raise HTTPException(400, "订阅格式不对")
+    with _push_lock:
+        subs = push.load_subs()
+        subs[sub.endpoint] = {"endpoint": sub.endpoint, "keys": {"p256dh": sub.keys.p256dh, "auth": sub.keys.auth}}
+        push.save_subs(subs)
+    return {"ok": True, "count": len(subs)}
+
+
+class PushMessage(BaseModel):
+    title: str = "推流"
+    body: str
+    url: str = "/"
+
+
+@app.post("/api/push/send")
+def push_send(m: PushMessage):
+    if not m.body.strip():
+        raise HTTPException(400, "body 不能为空")
+    with _push_lock:
+        if not push.load_subs():
+            raise HTTPException(400, "还没有手机开启提醒")
+        return {"ok": True, "result": push.send_all(m.title[:80], m.body[:300], m.url)}
 
 
 def _app_version() -> str:

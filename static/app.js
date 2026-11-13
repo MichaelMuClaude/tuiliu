@@ -700,3 +700,27 @@ async function showLastPush() {
 showLastPush();
 setInterval(showLastPush, 10 * 60 * 1000);
 
+
+// Pushes (2026-11-13, the user's wish, same as their 水与步 app): 开启提醒 in the topics sheet until this phone says yes.
+async function pushSetup() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
+  const reg = await navigator.serviceWorker.register("/sw.js");
+  const sub = await reg.pushManager.getSubscription();
+  const on = sub && Notification.permission === "granted";
+  document.getElementById("pushOn").hidden = on || Notification.permission === "denied";
+  document.getElementById("pushText").textContent = on ? "提醒已开启"
+    : Notification.permission === "denied" ? "通知被关掉了，要去 iPhone 设置 → 通知 → 推流 里打开" : "";
+  if (on) api("/api/push/subscribe", { method: "POST", body: JSON.stringify(sub.toJSON()) }).catch(() => {});
+}
+document.getElementById("pushOn").addEventListener("click", async () => {
+  try {
+    if (await Notification.requestPermission() !== "granted") { pushSetup(); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const { key } = await api("/api/push/key");
+    const raw = Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+    await api("/api/push/subscribe", { method: "POST", body: JSON.stringify(sub.toJSON()) });
+    toast("提醒开好了"); pushSetup();
+  } catch (err) { toast("开启提醒失败：" + err.message); }
+});
+pushSetup().catch(() => {});
